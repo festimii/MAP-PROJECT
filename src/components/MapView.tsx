@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
@@ -14,7 +14,9 @@ type StoreData = {
   Latitude: number;
   Adresse: string | null;
   Format: string | null;
+  City_Name?: string;
 };
+
 type MapViewProps = {
   selected?: string | string[] | null;
   selectedDepartment?: {
@@ -28,25 +30,42 @@ export default function MapView({ selected, cities }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const navigate = useNavigate();
+  const [darkMode, setDarkMode] = useState(false);
 
+  // Initial map setup
   useEffect(() => {
     if (!mapContainer.current) return;
 
+    const styleUrl = darkMode
+      ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+      : "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+
     const map: Map = new maplibregl.Map({
       container: mapContainer.current,
-      style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+      style: styleUrl,
       center: [21, 42.6],
-      zoom: 8,
+      zoom: 7.5,
+      pitch: 0,
+      bearing: 0,
     });
 
     mapRef.current = map;
+
+    // Controls
     map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(
+      new maplibregl.ScaleControl({ unit: "metric" }),
+      "bottom-left"
+    );
 
     map.on("load", async () => {
       try {
+        // --- City polygons ---
         const res = await fetch("/kosovo-cities.geojson");
-        if (!res.ok)
-          return console.error("Failed to load kosovo-cities.geojson");
+        if (!res.ok) {
+          console.error("Failed to load kosovo-cities.geojson");
+          return;
+        }
         const geojson = await res.json();
 
         const nameKey = geojson.features[0].properties.VARNAME_2
@@ -60,7 +79,6 @@ export default function MapView({ selected, cities }: MapViewProps) {
         (map as any).__cityNameKey = nameKey;
         map.addSource("kosovo-cities", { type: "geojson", data: geojson });
 
-        // ✅ Default fill-color: blue for listed cities, gray for others
         const colorExpr: any[] = ["match", ["get", nameKey]];
         cities.forEach((c) => {
           colorExpr.push(c.City_Name, "#4b5563");
@@ -71,11 +89,19 @@ export default function MapView({ selected, cities }: MapViewProps) {
           id: "city-boundaries",
           type: "fill",
           source: "kosovo-cities",
-          paint: {
-            "fill-color": colorExpr,
-            "fill-opacity": 0.35,
-          },
+          paint: { "fill-color": colorExpr, "fill-opacity": 0.35 },
         });
+
+        map.addLayer(
+          {
+            id: "city-hover",
+            type: "fill",
+            source: "kosovo-cities",
+            paint: { "fill-color": "#3b82f6", "fill-opacity": 0.6 },
+            filter: ["==", ["get", nameKey], ""],
+          },
+          "city-boundaries"
+        );
 
         map.addLayer({
           id: "city-borders",
@@ -84,7 +110,6 @@ export default function MapView({ selected, cities }: MapViewProps) {
           paint: { "line-color": "#111827", "line-width": 1.2 },
         });
 
-        // ✅ Highlight overlay (3D extrusion)
         map.addLayer({
           id: "city-highlight",
           type: "fill-extrusion",
@@ -113,20 +138,8 @@ export default function MapView({ selected, cities }: MapViewProps) {
             "text-halo-width": 2,
           },
         });
-        map.addLayer({
-          id: "department-highlight",
-          type: "circle",
-          source: "stores",
-          paint: {
-            "circle-radius": 10,
-            "circle-color": "#22c55e",
-            "circle-stroke-color": "#fff",
-            "circle-stroke-width": 2,
-          },
-          filter: ["==", "Department_Code", ""], // start empty
-        });
 
-        // ✅ Store points with city reference
+        // --- Store points with clustering ---
         const storesRes = await fetch("http://localhost:4000/api/areas");
         if (storesRes.ok) {
           const stores: StoreData[] = await storesRes.json();
@@ -140,7 +153,6 @@ export default function MapView({ selected, cities }: MapViewProps) {
               },
               properties: {
                 department: d.Department_Name,
-                // pick City_Name if available, otherwise normalize Area_Name
                 city: d.City_Name ?? d.Area_Name.replace(/ Area$/i, ""),
               },
             }));
@@ -148,12 +160,53 @@ export default function MapView({ selected, cities }: MapViewProps) {
           map.addSource("stores", {
             type: "geojson",
             data: { type: "FeatureCollection", features },
+            cluster: true,
+            clusterRadius: 50,
           });
 
+          // Cluster circles
+          map.addLayer({
+            id: "clusters",
+            type: "circle",
+            source: "stores",
+            filter: ["has", "point_count"],
+            paint: {
+              "circle-color": "#2563eb",
+              "circle-radius": [
+                "step",
+                ["get", "point_count"],
+                15,
+                10,
+                20,
+                50,
+                25,
+              ],
+              "circle-stroke-color": "#fff",
+              "circle-stroke-width": 1,
+            },
+          });
+
+          // Cluster count labels
+          map.addLayer({
+            id: "cluster-count",
+            type: "symbol",
+            source: "stores",
+            filter: ["has", "point_count"],
+            layout: {
+              "text-field": "{point_count_abbreviated}",
+              "text-size": 12,
+            },
+            paint: {
+              "text-color": "#fff",
+            },
+          });
+
+          // Individual store points
           map.addLayer({
             id: "store-points",
             type: "circle",
             source: "stores",
+            filter: ["!", ["has", "point_count"]],
             paint: {
               "circle-radius": 6,
               "circle-color": "#ef4444",
@@ -162,15 +215,17 @@ export default function MapView({ selected, cities }: MapViewProps) {
             },
           });
 
+          // Store labels (toggle with zoom)
           map.addLayer({
             id: "store-labels",
             type: "symbol",
             source: "stores",
+            filter: ["!", ["has", "point_count"]],
             layout: {
               "text-field": ["get", "department"],
-              "text-size": 13,
+              "text-size": 12,
               "text-offset": [0, 1.2],
-              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
               visibility: "none",
             },
             paint: {
@@ -187,12 +242,47 @@ export default function MapView({ selected, cities }: MapViewProps) {
               map.getZoom() >= 12 ? "visible" : "none"
             );
           });
+
+          // Popups for stores
+          map.on("click", "store-points", (e) => {
+            if (!e.features?.length) return;
+            const props = e.features[0].properties;
+            new maplibregl.Popup()
+              .setLngLat(e.lngLat)
+              .setHTML(`<strong>${props.department}</strong><br>${props.city}`)
+              .addTo(map);
+          });
         }
 
+        // Hover highlight for cities
+        let hoveredCity: string | null = null;
+        map.on("mousemove", "city-boundaries", (e) => {
+          if (!e.features?.length) return;
+          const cityName = e.features[0].properties?.[nameKey];
+          if (cityName && cityName !== hoveredCity) {
+            hoveredCity = cityName;
+            map.setFilter("city-hover", ["==", ["get", nameKey], cityName]);
+          }
+        });
+        map.on("mouseleave", "city-boundaries", () => {
+          hoveredCity = null;
+          map.setFilter("city-hover", ["==", ["get", nameKey], ""]);
+        });
+
+        // FlyTo on city click
         map.on("click", "city-boundaries", (e) => {
           if (!e.features?.length) return;
           const cityName = e.features[0].properties?.[nameKey];
-          if (cityName) navigate(`/report/${encodeURIComponent(cityName)}`);
+          if (cityName) {
+            navigate(`/report/${encodeURIComponent(cityName)}`);
+            map.flyTo({
+              center: e.lngLat,
+              zoom: 10,
+              bearing: -20,
+              pitch: 45,
+              duration: 2000,
+            });
+          }
         });
       } catch (err) {
         console.error("Map load error:", err);
@@ -202,74 +292,29 @@ export default function MapView({ selected, cities }: MapViewProps) {
     return () => {
       map.remove();
     };
-  }, [navigate, cities]);
+  }, [navigate, cities, darkMode]);
 
-  useEffect(() => {
-    if (!mapRef.current) return;
-    const map = mapRef.current;
-    const nameKey = (map as any).__cityNameKey;
-    if (!nameKey || !map.getLayer("city-highlight")) return;
-
-    let blinkInterval: NodeJS.Timeout | null = null;
-
-    if (selected) {
-      const selectedCities = Array.isArray(selected) ? selected : [selected];
-      const normalized = selectedCities.map((c) => c.trim().toLowerCase());
-
-      // Highlight polygons
-      map.setFilter("city-highlight", ["in", nameKey, ...selectedCities]);
-
-      // Fit bounds if single
-      const src: any = map.getSource("kosovo-cities");
-      if (src && src._data && selectedCities.length === 1) {
-        const match = src._data.features.find(
-          (f: any) => f.properties[nameKey] === selectedCities[0]
-        );
-        if (match) {
-          const box = bbox(match);
-          map.fitBounds(box as any, { padding: 40, duration: 800 });
-        }
-      }
-
-      // ✅ Filter stores by normalized city name
-      if (map.getLayer("store-points")) {
-        map.setFilter("store-points", [
-          "in",
-          ["downcase", ["get", "city"]],
-          ...normalized,
-        ]);
-      }
-      if (map.getLayer("store-labels")) {
-        map.setFilter("store-labels", [
-          "in",
-          ["downcase", ["get", "city"]],
-          ...normalized,
-        ]);
-        map.setLayoutProperty("store-labels", "visibility", "visible");
-      }
-    } else {
-      // Reset highlight
-      map.setFilter("city-highlight", ["in", nameKey, ""]);
-
-      // Reset stores
-      if (map.getLayer("store-points")) {
-        map.setFilter("store-points", null);
-        map.setPaintProperty("store-points", "circle-opacity", 1);
-      }
-      if (map.getLayer("store-labels")) {
-        map.setFilter("store-labels", null);
-        map.setLayoutProperty(
-          "store-labels",
-          "visibility",
-          map.getZoom() >= 12 ? "visible" : "none"
-        );
-      }
-    }
-
-    return () => {
-      if (blinkInterval) clearInterval(blinkInterval);
-    };
-  }, [selected]);
-
-  return <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />;
+  return (
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      {/* Toggle button */}
+      <button
+        onClick={() => setDarkMode(!darkMode)}
+        style={{
+          position: "absolute",
+          top: 10,
+          left: 10,
+          zIndex: 1,
+          padding: "6px 12px",
+          background: "#111",
+          color: "#fff",
+          border: "none",
+          borderRadius: "4px",
+          cursor: "pointer",
+        }}
+      >
+        {darkMode ? "Light Mode" : "Dark Mode"}
+      </button>
+      <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
+    </div>
+  );
 }

@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Card, CardActionArea, CardContent } from "@mui/material";
-
 import {
   AppBar,
   Toolbar,
@@ -53,27 +52,26 @@ const darkTheme = createTheme({
   },
 });
 
+type City = { City_Code: number; City_Name: string };
+type Area = {
+  Area_Code: string;
+  Area_Name: string;
+  Cities: string[];
+  Departments: {
+    Department_Code: string;
+    Department_Name: string;
+    SQM: number;
+  }[];
+};
+
 export default function App() {
   const [filterByCity, setFilterByCity] = useState(true);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
-  const [cityList, setCityList] = useState<
-    { City_Code: number; City_Name: string }[]
-  >([]);
-  const [areaList, setAreaList] = useState<
-    {
-      Area_Code: string;
-      Area_Name: string;
-      Cities: string[];
-      Departments: {
-        Department_Code: string;
-        Department_Name: string;
-        SQM: number;
-      }[];
-    }[]
-  >([]);
+  const [cityList, setCityList] = useState<City[]>([]);
+  const [areaList, setAreaList] = useState<Area[]>([]);
   const navigate = useNavigate();
 
-  // Load cities/areas from API
+  // Load cities and areas
   useEffect(() => {
     axios
       .get("http://localhost:4000/api/cities")
@@ -90,7 +88,6 @@ export default function App() {
 
   const handleSelect = (item: any) => {
     setSelectedItem(item);
-
     if (filterByCity) {
       navigate(`/report/${encodeURIComponent(item.name)}`);
     }
@@ -103,7 +100,7 @@ export default function App() {
   // Sidebar content
   let drawerContent;
   if (!filterByCity && selectedItem) {
-    // Detail mode for an area
+    // Detail mode (Area with departments)
     drawerContent = (
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <Toolbar />
@@ -136,17 +133,11 @@ export default function App() {
                 mb: 1.5,
                 borderRadius: 2,
                 bgcolor: "background.default",
-                "&:hover": {
-                  boxShadow: 3,
-                  borderColor: "primary.main",
-                },
+                "&:hover": { boxShadow: 3, borderColor: "primary.main" },
               }}
             >
               <CardActionArea
-                onClick={() => {
-                  // You can navigate or show a detail modal here
-                  console.log("Selected department:", d);
-                }}
+                onClick={() => console.log("Selected department:", d)}
               >
                 <CardContent>
                   <Typography variant="body2" fontWeight="bold">
@@ -166,7 +157,7 @@ export default function App() {
       </Box>
     );
   } else {
-    // Normal list mode
+    // City/Area list mode
     const items = filterByCity
       ? cityList.map((c) => ({ code: c.City_Code, name: c.City_Name }))
       : areaList.map((a) => ({
@@ -242,6 +233,7 @@ export default function App() {
     <ThemeProvider theme={darkTheme}>
       <Box sx={{ display: "flex", minHeight: "100vh", width: "100%" }}>
         <CssBaseline />
+
         {/* Navbar */}
         <AppBar
           position="fixed"
