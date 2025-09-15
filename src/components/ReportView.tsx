@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { Box, Typography, Paper, Grid, Button } from "@mui/material";
+import { Box, Typography, Paper, Button } from "@mui/material";
+import Grid from "@mui/material/GridLegacy";
 
 export default function ReportView() {
   const { city } = useParams<{ city: string }>();
