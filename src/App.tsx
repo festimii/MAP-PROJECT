@@ -21,7 +21,7 @@ import {
 import { Menu as MenuIcon, LocationCity, Map } from "@mui/icons-material";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import axios from "axios";
-import MapView from "./components/MapView";
+import MapView, { type MapSelection } from "./components/MapView";
 import ReportView from "./components/ReportView";
 
 const drawerWidth = 300;
@@ -107,6 +107,18 @@ export default function App() {
   const handleBack = () => {
     setSelectedItem(null);
   };
+
+  const mapSelection: MapSelection | null = filterByCity
+    ? selectedItem?.type === "city"
+      ? { mode: "city", city: selectedItem.name }
+      : null
+    : selectedItem?.type === "area"
+      ? {
+          mode: "area",
+          area: selectedItem.name,
+          cities: selectedItem.cities,
+        }
+      : null;
 
   // Sidebar content
   let drawerContent;
@@ -314,13 +326,7 @@ export default function App() {
                 path="/"
                 element={
                   <MapView
-                    selected={
-                      filterByCity
-                        ? selectedItem?.name ?? null
-                        : selectedItem?.type === "area"
-                        ? selectedItem.cities
-                        : null
-                    }
+                    selection={mapSelection}
                     cities={cityList}
                   />
                 }
