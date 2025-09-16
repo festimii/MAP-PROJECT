@@ -13,12 +13,10 @@ export type MapSelection =
   | { mode: "zone"; zone: string; cities: string[]; areas: string[] };
 
 type StoreData = {
-  Area_Code: string | null;
+  Area_Code: string;
   Area_Name: string;
   Zone_Code?: string | null;
   Zone_Name?: string | null;
-  Region_Code?: string | null;
-  Region_Name?: string | null;
   Department_Code: string;
   Department_Name: string;
   SQM: number | null;
@@ -26,8 +24,7 @@ type StoreData = {
   Latitude: number | null;
   Adresse: string | null;
   Format: string | null;
-  City_Name?: string | null;
-  City_Code?: string | number | null;
+  City_Name?: string;
 };
 
 type NearbyBusiness = {
@@ -39,7 +36,7 @@ type NearbyBusiness = {
   Address: string | null;
 };
 
-export type StoreWithBusinesses = StoreData & {
+type StoreWithBusinesses = StoreData & {
   NearbyBusinesses?: NearbyBusiness[];
 };
 
@@ -71,8 +68,7 @@ const normalizeName = (value: string) => value.toLowerCase().trim();
 
 type MapViewProps = {
   selection: MapSelection | null;
-  cities: { City_Code: string; City_Name: string }[];
-  stores: StoreWithBusinesses[];
+  cities: { City_Code: number; City_Name: string }[];
 };
 
 const humanizeCategory = (value: string) =>
@@ -82,14 +78,11 @@ const humanizeCategory = (value: string) =>
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ") || "Other";
 
-export default function MapView({ selection, cities, stores }: MapViewProps) {
+export default function MapView({ selection, cities }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const navigate = useNavigate();
   const [darkMode, setDarkMode] = useState(false);
-  const storeFeaturesRef = useRef<
-    GeoJSON.Feature<GeoJSON.Point, StoreFeatureProperties>[]
-  >([]);
   const businessFeaturesRef = useRef<
     GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[]
   >([]);
@@ -101,93 +94,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
   const selectionRef = useRef<MapSelection | null>(null);
+  const [storesData, setStoresData] = useState<StoreData[]>([]);
   const previousSelectionHadValue = useRef(false);
-
-  const storeFeatures = useMemo(
-    () =>
-      stores
-        .filter(
-          (store): store is StoreData & { Longitude: number; Latitude: number } =>
-            store.Longitude !== null && store.Latitude !== null
-        )
-        .map((store) => {
-          const areaName = store.Area_Name?.trim() || "Unassigned Area";
-          const rawCity = store.City_Name?.trim();
-          const fallbackCity =
-            rawCity && rawCity.length > 0
-              ? rawCity
-              : areaName.replace(/ Area$/i, "") || "Unknown city";
-          const zoneName =
-            (store.Zone_Name ?? store.Region_Name ?? "Unassigned Region").trim() ||
-            "Unassigned Region";
-
-          return {
-            type: "Feature" as const,
-            geometry: {
-              type: "Point" as const,
-              coordinates: [store.Longitude, store.Latitude],
-            },
-            properties: {
-              department: store.Department_Name,
-              city: fallbackCity,
-              cityNormalized: normalizeName(fallbackCity),
-              area: areaName,
-              areaNormalized: normalizeName(areaName),
-              address: store.Adresse ?? null,
-              format: store.Format ?? null,
-              sqm: store.SQM ?? 0,
-              zone: zoneName,
-              zoneNormalized: normalizeName(zoneName),
-            } satisfies StoreFeatureProperties,
-          } satisfies GeoJSON.Feature<
-            GeoJSON.Point,
-            StoreFeatureProperties
-          >;
-        }),
-    [stores]
-  );
-
-  const businessFeatures = useMemo(
-    () =>
-      stores.flatMap((store) => {
-        if (!store.NearbyBusinesses?.length) {
-          return [];
-        }
-
-        return store.NearbyBusinesses.filter(
-          (business) =>
-            business.Longitude !== null &&
-            business.Latitude !== null &&
-            Number.isFinite(business.Longitude) &&
-            Number.isFinite(business.Latitude)
-        ).map((business) => {
-          const normalizedCategoryRaw = (business.Category || "other")
-            .toLowerCase()
-            .trim();
-          const normalizedCategory =
-            normalizedCategoryRaw.length > 0 ? normalizedCategoryRaw : "other";
-
-          return {
-            type: "Feature" as const,
-            geometry: {
-              type: "Point" as const,
-              coordinates: [business.Longitude, business.Latitude],
-            },
-            properties: {
-              id: business.OSM_Id,
-              name: business.Name || "Unknown",
-              category: normalizedCategory,
-              categoryLabel: humanizeCategory(normalizedCategory || "other"),
-              address: business.Address,
-              storeDepartment: store.Department_Name,
-              areaName: store.Area_Name,
-              cityName: store.City_Name ?? undefined,
-            },
-          } satisfies GeoJSON.Feature<GeoJSON.Point, BusinessProperties>;
-        });
-      }),
-    [stores]
-  );
 
   const updateBusinessSource = useCallback(
     (map: MapLibreMap, category: string) => {
@@ -400,73 +308,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     applySelectionToMap();
   }, [selection, applySelectionToMap]);
 
-  useEffect(() => {
-    storeFeaturesRef.current = storeFeatures;
-
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    const source = map.getSource("stores") as maplibregl.GeoJSONSource | null;
-    if (!source) {
-      return;
-    }
-
-    const featureCollection: GeoJSON.FeatureCollection<
-      GeoJSON.Point,
-      StoreFeatureProperties
-    > = {
-      type: "FeatureCollection",
-      features: storeFeatures,
-    };
-
-    source.setData(featureCollection);
-    applySelectionToMap();
-  }, [storeFeatures, applySelectionToMap]);
-
-  useEffect(() => {
-    businessFeaturesRef.current = businessFeatures;
-
-    const uniqueCategories = Array.from(
-      new Set(businessFeatures.map((feature) => feature.properties.category))
-    ).sort();
-
-    setBusinessCategories(uniqueCategories);
-
-    const preferredCategory = uniqueCategories.includes("supermarket")
-      ? "supermarket"
-      : uniqueCategories[0] ?? "all";
-    const currentSelection = selectedCategoryRef.current;
-    const nextCategory = uniqueCategories.length
-      ? uniqueCategories.includes(currentSelection)
-        ? currentSelection
-        : preferredCategory
-      : "all";
-
-    if (nextCategory !== currentSelection) {
-      selectedCategoryRef.current = nextCategory;
-      setSelectedCategory(nextCategory);
-    }
-
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    const update = () => updateBusinessSource(map, selectedCategoryRef.current);
-
-    if (!map.isStyleLoaded()) {
-      map.once("load", update);
-      return;
-    }
-
-    update();
-  }, [businessFeatures, updateBusinessSource]);
-
   // Initial map setup
   useEffect(() => {
     if (!mapContainer.current) return;
+
+    businessFeaturesRef.current = [];
+    setBusinessCategories([]);
 
     const styleUrl = darkMode
       ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
@@ -482,6 +329,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     });
 
     mapRef.current = map;
+    let isMounted = true;
 
     // Controls
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
@@ -575,23 +423,51 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         });
 
         // --- Store points with clustering ---
-        map.addSource("stores", {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: storeFeaturesRef.current,
-          },
-          cluster: true,
-          clusterRadius: 50,
-        });
+          const storesRes = await fetch("http://localhost:4000/api/areas");
+          if (storesRes.ok) {
+            const stores: StoreData[] = await storesRes.json();
+            setStoresData(stores);
+            const features: GeoJSON.Feature[] = stores
+              .filter((d) => d.Longitude !== null && d.Latitude !== null)
+              .map((d) => {
+                const fallbackCity = d.City_Name ?? d.Area_Name.replace(/ Area$/i, "");
+                const zoneName = d.Zone_Name ?? "Unassigned Zone";
 
-        // Cluster circles
-        map.addLayer({
-          id: "clusters",
-          type: "circle",
-          source: "stores",
-          filter: ["has", "point_count"],
-          paint: {
+                return {
+                  type: "Feature",
+                  geometry: {
+                    type: "Point",
+                    coordinates: [d.Longitude as number, d.Latitude as number],
+                  },
+                  properties: {
+                    department: d.Department_Name,
+                    city: fallbackCity,
+                    cityNormalized: normalizeName(fallbackCity),
+                    area: d.Area_Name,
+                    areaNormalized: normalizeName(d.Area_Name),
+                    address: d.Adresse ?? null,
+                    format: d.Format ?? null,
+                    sqm: d.SQM ?? 0,
+                    zone: zoneName,
+                    zoneNormalized: normalizeName(zoneName),
+                  } satisfies StoreFeatureProperties,
+                };
+              });
+
+            map.addSource("stores", {
+              type: "geojson",
+              data: { type: "FeatureCollection", features },
+              cluster: true,
+              clusterRadius: 50,
+            });
+
+          // Cluster circles
+          map.addLayer({
+            id: "clusters",
+            type: "circle",
+            source: "stores",
+            filter: ["has", "point_count"],
+            paint: {
               "circle-color": "#2563eb",
               "circle-radius": [
                 "step",
@@ -605,43 +481,43 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               "circle-stroke-color": "#fff",
               "circle-stroke-width": 1,
             },
-        });
+          });
 
-        // Cluster count labels
-        map.addLayer({
-          id: "cluster-count",
-          type: "symbol",
-          source: "stores",
-          filter: ["has", "point_count"],
-          layout: {
+          // Cluster count labels
+          map.addLayer({
+            id: "cluster-count",
+            type: "symbol",
+            source: "stores",
+            filter: ["has", "point_count"],
+            layout: {
               "text-field": "{point_count_abbreviated}",
               "text-size": 12,
             },
             paint: {
               "text-color": "#fff",
             },
-        });
+          });
 
-        // Individual store points
-        map.addLayer({
-          id: "store-points",
-          type: "circle",
-          source: "stores",
-          filter: ["!has", "point_count"],
-          paint: {
+          // Individual store points
+          map.addLayer({
+            id: "store-points",
+            type: "circle",
+            source: "stores",
+            filter: ["!has", "point_count"],
+            paint: {
               "circle-radius": 6,
               "circle-color": "#ef4444",
               "circle-stroke-color": "#fff",
               "circle-stroke-width": 1,
             },
-        });
+          });
 
-        map.addLayer({
-          id: "store-points-highlight",
-          type: "circle",
-          source: "stores",
-          filter: [
-            "all",
+          map.addLayer({
+            id: "store-points-highlight",
+            type: "circle",
+            source: "stores",
+            filter: [
+              "all",
               ["!has", "point_count"],
               ["==", "cityNormalized", "__none__"],
             ],
@@ -652,15 +528,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               "circle-stroke-width": 2,
               "circle-opacity": 0.9,
             },
-        });
+          });
 
-        // Store labels (toggle with zoom)
-        map.addLayer({
-          id: "store-labels",
-          type: "symbol",
-          source: "stores",
-          filter: [
-            "all",
+          // Store labels (toggle with zoom)
+          map.addLayer({
+            id: "store-labels",
+            type: "symbol",
+            source: "stores",
+            filter: [
+              "all",
               ["!has", "point_count"],
               ["==", "cityNormalized", "__none__"],
             ],
@@ -676,35 +552,35 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               "text-halo-color": "#ffffff",
               "text-halo-width": 2,
             },
-        });
+          });
 
-        map.on("zoom", () => {
-          const zoomLevel = map.getZoom();
-          const hasSelection = Boolean(selectionRef.current);
-          const shouldShowStoreLabels = hasSelection && zoomLevel >= 11;
-          if (map.getLayer("store-labels")) {
-            map.setLayoutProperty(
+          map.on("zoom", () => {
+            const zoomLevel = map.getZoom();
+            const hasSelection = Boolean(selectionRef.current);
+            const shouldShowStoreLabels = hasSelection && zoomLevel >= 11;
+            if (map.getLayer("store-labels")) {
+              map.setLayoutProperty(
                 "store-labels",
                 "visibility",
                 shouldShowStoreLabels ? "visible" : "none"
               );
             }
             if (map.getLayer("business-labels")) {
-            map.setLayoutProperty(
-              "business-labels",
-              "visibility",
-              zoomLevel >= 12 ? "visible" : "none"
-            );
-          }
-        });
+              map.setLayoutProperty(
+                "business-labels",
+                "visibility",
+                zoomLevel >= 12 ? "visible" : "none"
+              );
+            }
+          });
 
-        // Popups for stores
-        map.on("click", "store-points", (e) => {
-          if (!e.features?.length) return;
-          const props =
-            e.features[0].properties as unknown as StoreFeatureProperties;
-          const formatLine = props.format
-            ? `<div style="margin-top:4px;color:#f97316;font-weight:600">${props.format}</div>`
+          // Popups for stores
+          map.on("click", "store-points", (e) => {
+            if (!e.features?.length) return;
+            const props =
+              e.features[0].properties as unknown as StoreFeatureProperties;
+            const formatLine = props.format
+              ? `<div style="margin-top:4px;color:#f97316;font-weight:600">${props.format}</div>`
               : "";
             const addressLine = props.address
               ? `<div style="margin-top:4px;color:#6b7280">${props.address}</div>`
@@ -724,14 +600,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   </div>`
               )
               .addTo(map);
-        });
+          });
 
-        map.on("click", "store-points-highlight", (e) => {
-          if (!e.features?.length) return;
-          const props =
-            e.features[0].properties as unknown as StoreFeatureProperties;
-          const formatLine = props.format
-            ? `<div style="margin-top:4px;color:#f97316;font-weight:600">${props.format}</div>`
+          map.on("click", "store-points-highlight", (e) => {
+            if (!e.features?.length) return;
+            const props =
+              e.features[0].properties as unknown as StoreFeatureProperties;
+            const formatLine = props.format
+              ? `<div style="margin-top:4px;color:#f97316;font-weight:600">${props.format}</div>`
               : "";
             const addressLine = props.address
               ? `<div style="margin-top:4px;color:#6b7280">${props.address}</div>`
@@ -751,27 +627,27 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   </div>`
               )
               .addTo(map);
-        });
+          });
 
-        map.on("mouseenter", "store-points", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-        map.on("mouseleave", "store-points", () => {
-          map.getCanvas().style.cursor = "";
-        });
-        map.on("mouseenter", "store-points-highlight", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-        map.on("mouseleave", "store-points-highlight", () => {
-          map.getCanvas().style.cursor = "";
-        });
+          map.on("mouseenter", "store-points", () => {
+            map.getCanvas().style.cursor = "pointer";
+          });
+          map.on("mouseleave", "store-points", () => {
+            map.getCanvas().style.cursor = "";
+          });
+          map.on("mouseenter", "store-points-highlight", () => {
+            map.getCanvas().style.cursor = "pointer";
+          });
+          map.on("mouseleave", "store-points-highlight", () => {
+            map.getCanvas().style.cursor = "";
+          });
 
-        map.on("click", "clusters", (event) => {
-          if (!event.features?.length) return;
-          const feature = event.features[0];
-          const clusterId = feature.properties?.cluster_id;
-          const source = map.getSource("stores") as maplibregl.GeoJSONSource & {
-            getClusterExpansionZoom: (
+          map.on("click", "clusters", (event) => {
+            if (!event.features?.length) return;
+            const feature = event.features[0];
+            const clusterId = feature.properties?.cluster_id;
+            const source = map.getSource("stores") as maplibregl.GeoJSONSource & {
+              getClusterExpansionZoom: (
                 clusterIdValue: number,
                 callback: (error: Error | null, zoom: number) => void
               ) => void;
@@ -785,29 +661,19 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               const [lng, lat] = feature.geometry.coordinates as [number, number];
               map.easeTo({ center: [lng, lat], zoom, duration: 600 });
             });
-        });
+          });
 
-        map.on("mouseenter", "clusters", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-        map.on("mouseleave", "clusters", () => {
-          map.getCanvas().style.cursor = "";
-        });
-
-        const initialBusinessFeatures =
-          selectedCategoryRef.current === "all"
-            ? businessFeaturesRef.current
-            : businessFeaturesRef.current.filter(
-                (feature) =>
-                  feature.properties.category === selectedCategoryRef.current
-              );
+          map.on("mouseenter", "clusters", () => {
+            map.getCanvas().style.cursor = "pointer";
+          });
+          map.on("mouseleave", "clusters", () => {
+            map.getCanvas().style.cursor = "";
+          });
+        }
 
         map.addSource("businesses", {
           type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: initialBusinessFeatures,
-          },
+          data: { type: "FeatureCollection", features: [] },
         });
 
         map.addLayer({
@@ -862,7 +728,83 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             .addTo(map);
         });
 
-        updateBusinessSource(map, selectedCategoryRef.current);
+        try {
+          const businessesRes = await fetch(
+            "http://localhost:4000/api/combined/stores-with-businesses"
+          );
+
+          if (businessesRes.ok) {
+            const data: StoreWithBusinesses[] = await businessesRes.json();
+            const features = data.flatMap((store) => {
+              if (!store.NearbyBusinesses?.length) {
+                return [];
+              }
+
+              return store.NearbyBusinesses.filter(
+                (b) => b.Longitude && b.Latitude
+              ).map((business) => {
+                const normalizedCategoryRaw = (business.Category || "other")
+                  .toLowerCase()
+                  .trim();
+                const normalizedCategory =
+                  normalizedCategoryRaw.length > 0
+                    ? normalizedCategoryRaw
+                    : "other";
+
+                return {
+                  type: "Feature" as const,
+                  geometry: {
+                    type: "Point" as const,
+                    coordinates: [business.Longitude, business.Latitude],
+                  },
+                  properties: {
+                    id: business.OSM_Id,
+                    name: business.Name || "Unknown",
+                    category: normalizedCategory,
+                    categoryLabel: humanizeCategory(
+                      normalizedCategory || "other"
+                    ),
+                    address: business.Address,
+                    storeDepartment: store.Department_Name,
+                    areaName: store.Area_Name,
+                    cityName: store.City_Name,
+                  },
+                } satisfies GeoJSON.Feature<
+                  GeoJSON.Point,
+                  BusinessProperties
+                >;
+              });
+            });
+
+            businessFeaturesRef.current = features;
+
+            const uniqueCategories = Array.from(
+              new Set(features.map((feature) => feature.properties.category))
+            ).sort();
+
+            if (isMounted) {
+              setBusinessCategories(uniqueCategories);
+
+              const preferredCategory = uniqueCategories.includes("supermarket")
+                ? "supermarket"
+                : uniqueCategories[0] ?? "all";
+              const currentSelection = selectedCategoryRef.current;
+              const nextCategory = uniqueCategories.length
+                ? uniqueCategories.includes(currentSelection)
+                  ? currentSelection
+                  : preferredCategory
+                : "all";
+
+              if (nextCategory !== currentSelection) {
+                setSelectedCategory(nextCategory);
+              }
+
+              updateBusinessSource(map, nextCategory);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to load business data:", err);
+        }
 
         // Hover highlight for cities
         let hoveredCity: string | null = null;
@@ -901,6 +843,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     });
 
     return () => {
+      isMounted = false;
       map.remove();
     };
   }, [navigate, cities, darkMode, updateBusinessSource, applySelectionToMap]);
@@ -924,7 +867,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       return null;
     }
 
-    let matchingStores: StoreWithBusinesses[] = [];
+    let matchingStores: StoreData[] = [];
     let label = "";
     let focusLabel = "City focus";
     let cityNames: string[] = [];
@@ -935,7 +878,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       focusLabel = "City focus";
       cityNames = [selection.city];
       const normalizedTarget = normalizeName(selection.city);
-      matchingStores = stores.filter((store) => {
+      matchingStores = storesData.filter((store) => {
         const candidateName = normalizeName(
           store.City_Name ?? store.Area_Name.replace(/ Area$/i, "")
         );
@@ -947,7 +890,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       cityNames = selection.cities;
       areaNames = [selection.area];
       const normalizedTarget = normalizeName(selection.area);
-      matchingStores = stores.filter((store) => {
+      matchingStores = storesData.filter((store) => {
         const areaName = store.Area_Name ? normalizeName(store.Area_Name) : "";
         return areaName === normalizedTarget;
       });
@@ -957,10 +900,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       cityNames = selection.cities;
       areaNames = selection.areas;
       const normalizedTarget = normalizeName(selection.zone);
-      matchingStores = stores.filter((store) => {
-        const zoneName = normalizeName(
-          store.Zone_Name ?? store.Region_Name ?? "Unassigned Region"
-        );
+      matchingStores = storesData.filter((store) => {
+        const zoneName = normalizeName(store.Zone_Name ?? "Unassigned Zone");
         return zoneName === normalizedTarget;
       });
     }
@@ -991,7 +932,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       totalSQM,
       topFormats,
     };
-  }, [selection, stores]);
+  }, [selection, storesData]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -1258,9 +1199,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     }}
                   >
                     {(store.SQM ?? 0).toLocaleString()} m² · {store.Area_Name}
-                    {store.Zone_Name ?? store.Region_Name
-                      ? ` · ${store.Zone_Name ?? store.Region_Name}`
-                      : ""}
+                    {store.Zone_Name ? ` · ${store.Zone_Name}` : ""}
                   </p>
                 </div>
               ))
