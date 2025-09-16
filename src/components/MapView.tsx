@@ -6,6 +6,30 @@ import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
+import {
+  Box,
+  Button,
+  Chip,
+  Divider,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  Tooltip,
+  Typography,
+} from "@mui/material";
+import type { SelectChangeEvent } from "@mui/material/Select";
+import {
+  DarkMode,
+  LightMode,
+  LocationCity,
+  MapOutlined,
+  TravelExplore,
+  Tune,
+} from "@mui/icons-material";
 
 import { buildApiUrl } from "../config/apiConfig";
 import type { MapSelection, StoreData } from "../models/map";
@@ -1368,647 +1392,518 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     };
   }, [selection, storesData]);
 
+  const displayedStores = selectionSummary?.stores.slice(0, 6) ?? [];
+  const additionalStoreCount =
+    selectionSummary && selectionSummary.storeCount > displayedStores.length
+      ? selectionSummary.storeCount - displayedStores.length
+      : 0;
+  const geoCoveragePercent = selectionSummary
+    ? selectionSummary.storeCount > 0
+      ? Math.round(
+          (selectionSummary.geocodedCount / selectionSummary.storeCount) * 100
+        )
+      : 0
+    : 0;
+
+  const handleCategoryChange = (event: SelectChangeEvent<string>) => {
+    categorySelectionWasUserDriven.current = true;
+    setSelectedCategory(event.target.value);
+  };
+
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {/* Toggle button */}
-      <button
-        onClick={() => setDarkMode(!darkMode)}
-        style={{
+    <Box sx={{ position: "relative", width: "100%", height: "100%" }}>
+      <Box
+        sx={{
           position: "absolute",
-          top: 10,
-          left: 10,
-          zIndex: 1,
-          padding: "6px 12px",
-          background: "#111",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
+          top: 16,
+          left: 16,
+          zIndex: 3,
         }}
       >
-        {darkMode ? "Light Mode" : "Dark Mode"}
-      </button>
-      {selectionSummary && (
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            zIndex: 2,
-            width: 320,
-            maxHeight: "calc(100% - 20px)",
-            overflow: "hidden",
-            background: "rgba(17, 24, 39, 0.85)",
-            color: "#f9fafb",
-            borderRadius: "14px",
-            boxShadow: "0 18px 45px rgba(15,23,42,0.45)",
-            border: "1px solid rgba(148, 163, 184, 0.35)",
-            backdropFilter: "blur(6px)",
+        <Paper
+          elevation={6}
+          sx={{
+            px: 2,
+            py: 1.5,
+            borderRadius: 3,
             display: "flex",
             flexDirection: "column",
+            gap: 1,
+            backgroundColor: "rgba(15, 23, 42, 0.88)",
+            border: "1px solid rgba(148, 163, 184, 0.3)",
+            color: "rgba(226, 232, 240, 0.92)",
+            backdropFilter: "blur(10px)",
+            minWidth: 200,
           }}
         >
-          <div style={{ padding: "16px 20px 12px" }}>
-            <span
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "rgba(148, 163, 184, 0.85)",
-              }}
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Typography variant="overline" sx={{ letterSpacing: 0.8 }}>
+              Map theme
+            </Typography>
+            <Tooltip
+              title={
+                darkMode
+                  ? "Switch to light basemap"
+                  : "Switch to dark basemap"
+              }
             >
-              {selectionSummary.focusLabel}
-            </span>
-            <h3
-              style={{
-                margin: "6px 0 0",
-                fontSize: 18,
-                fontWeight: 600,
-                color: "#f8fafc",
-              }}
-            >
+              <IconButton
+                size="small"
+                aria-label="Toggle map theme"
+                onClick={() => setDarkMode(!darkMode)}
+                sx={{
+                  color: "primary.light",
+                  bgcolor: "rgba(59, 130, 246, 0.15)",
+                  "&:hover": { bgcolor: "rgba(59, 130, 246, 0.25)" },
+                }}
+              >
+                {darkMode ? (
+                  <LightMode fontSize="small" />
+                ) : (
+                  <DarkMode fontSize="small" />
+                )}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Typography
+            variant="caption"
+            sx={{ color: "rgba(203, 213, 225, 0.8)" }}
+          >
+            Toggle between light and dark context layers for the basemap.
+          </Typography>
+        </Paper>
+      </Box>
+  
+      {selectionSummary && (
+        <Paper
+          elevation={10}
+          sx={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            zIndex: 3,
+            width: { xs: "calc(100% - 32px)", sm: 320, md: 360 },
+            maxHeight: { xs: "calc(100% - 32px)", md: "calc(100% - 32px)" },
+            display: "flex",
+            flexDirection: "column",
+            borderRadius: 3,
+            backgroundColor: "rgba(15, 23, 42, 0.92)",
+            border: "1px solid rgba(148, 163, 184, 0.35)",
+            color: "rgba(226, 232, 240, 0.95)",
+            backdropFilter: "blur(10px)",
+            overflow: "hidden",
+          }}
+        >
+          <Box sx={{ p: 2.5, pb: 2 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
+              <Typography
+                variant="overline"
+                sx={{
+                  letterSpacing: 0.8,
+                  color: "rgba(148, 163, 184, 0.85)",
+                }}
+              >
+                {selectionSummary.focusLabel}
+              </Typography>
+            </Stack>
+            <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
               {selectionSummary.label}
-            </h3>
+            </Typography>
             {selectionSummary.mode === "city" && (
-              <button
-                type="button"
+              <Button
+                size="small"
+                variant="outlined"
+                color="info"
+                startIcon={<TravelExplore fontSize="small" />}
+                sx={{
+                  mt: 1.5,
+                  borderRadius: 9999,
+                  alignSelf: "flex-start",
+                }}
                 onClick={() =>
                   navigate(`/report/${encodeURIComponent(selectionSummary.label)}`)
                 }
-                style={{
-                  marginTop: 10,
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 9999,
-                  border: "1px solid rgba(96,165,250,0.6)",
-                  background: "rgba(191, 219, 254, 0.18)",
-                  color: "#bae6fd",
-                  cursor: "pointer",
-                }}
               >
                 Open layered report
-              </button>
+              </Button>
             )}
-            <div
-              style={{
-                marginTop: 8,
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 6,
-              }}
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ mt: 1.5, flexWrap: "wrap" }}
             >
               {selectionSummary.cities.map((city) => (
-                <span
+                <Chip
                   key={city}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "2px 8px",
-                    borderRadius: 9999,
-                    fontSize: 11,
-                    background: "rgba(59, 130, 246, 0.18)",
-                    color: "rgba(191, 219, 254, 0.95)",
-                    border: "1px solid rgba(59, 130, 246, 0.3)",
-                  }}
-                >
-                  {city}
-                </span>
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label={city}
+                />
               ))}
-            </div>
+            </Stack>
             {selectionSummary.mode === "zone" &&
               selectionSummary.areas.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <p
-                    style={{
-                      margin: 0,
-                      fontSize: 11,
+                <Box sx={{ mt: 1.5 }}>
+                  <Typography
+                    variant="overline"
+                    sx={{
+                      letterSpacing: 0.7,
                       color: "rgba(148, 163, 184, 0.75)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
                     }}
                   >
                     Areas
-                  </p>
-                  <div
-                    style={{
-                      marginTop: 4,
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 6,
-                    }}
+                  </Typography>
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    sx={{ flexWrap: "wrap", mt: 0.5 }}
                   >
                     {selectionSummary.areas.map((area) => (
-                      <span
+                      <Chip
                         key={area}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          padding: "2px 8px",
-                          borderRadius: 9999,
-                          fontSize: 11,
-                          background: "rgba(59, 130, 246, 0.12)",
-                          color: "rgba(191, 219, 254, 0.9)",
-                          border: "1px solid rgba(59, 130, 246, 0.28)",
+                        size="small"
+                        variant="outlined"
+                        label={area}
+                        sx={{
+                          borderColor: "rgba(148, 163, 184, 0.4)",
+                          color: "rgba(226, 232, 240, 0.9)",
                         }}
-                      >
-                        {area}
-                      </span>
+                      />
                     ))}
-                  </div>
-                </div>
+                  </Stack>
+                </Box>
               )}
-          </div>
-          <div
-            style={{
-              padding: "0 20px 12px",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: 14,
-            }}
-          >
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Stores
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#f1f5f9",
-                }}
-              >
-                {selectionSummary.storeCount}
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Total SQM
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#f1f5f9",
-                }}
-              >
-                {selectionSummary.totalSQM.toLocaleString()} m²
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Geo coverage
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#f1f5f9",
-                }}
-              >
-                {selectionSummary.storeCount > 0
-                  ? `${Math.round(
-                      (selectionSummary.geocodedCount /
-                        selectionSummary.storeCount) *
-                        100
-                    )}%`
-                  : "0%"}
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 11,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                {selectionSummary.storeCount > 0
-                  ? `${selectionSummary.geocodedCount}/${selectionSummary.storeCount} mapped`
-                  : "0/0 mapped"}
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Top formats
-              </p>
-              {selectionSummary.topFormats.length === 0 ? (
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    fontSize: 12,
-                    color: "rgba(148, 163, 184, 0.7)",
+          </Box>
+          <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
+          <Box sx={{ p: 2, pt: 1.5 }}>
+            <Stack direction="row" spacing={1.25} sx={{ flexWrap: "wrap" }}>
+              {[
+                {
+                  label: "Stores",
+                  value: selectionSummary.storeCount.toLocaleString(),
+                },
+                {
+                  label: "Total SQM",
+                  value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
+                },
+                {
+                  label: "Geo coverage",
+                  value: `${geoCoveragePercent}%`,
+                  helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
+                },
+              ].map(({ label, value, helper }) => (
+                <Box
+                  key={label}
+                  sx={{
+                    flex: "1 1 120px",
+                    px: 1.5,
+                    py: 1.25,
+                    borderRadius: 2,
+                    border: "1px solid rgba(148, 163, 184, 0.25)",
+                    bgcolor: "rgba(30, 41, 59, 0.55)",
                   }}
                 >
-                  Mix coming soon
-                </p>
-              ) : (
-                <ul
-                  style={{
-                    margin: "6px 0 0",
-                    padding: 0,
-                    listStyle: "none",
-                    display: "grid",
-                    gap: 6,
-                  }}
-                >
-                  {selectionSummary.topFormats.map(({ format, count }) => (
-                    <li
-                      key={format}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 12,
-                        color: "rgba(226, 232, 240, 0.85)",
-                        background: "rgba(59, 130, 246, 0.12)",
-                        border: "1px solid rgba(59, 130, 246, 0.18)",
-                        borderRadius: 8,
-                        padding: "6px 8px",
-                      }}
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: "rgba(191, 219, 254, 0.7)",
+                      letterSpacing: 0.6,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {label}
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                    {value}
+                  </Typography>
+                  {helper && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: "rgba(148, 163, 184, 0.75)" }}
                     >
-                      <span style={{ fontWeight: 500 }}>{format}</span>
-                      <span>{count}×</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                      {helper}
+                    </Typography>
+                  )}
+                </Box>
+              ))}
+            </Stack>
             {selectionCompetition && (
-              <div>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: 12,
-                    color: "rgba(148, 163, 184, 0.75)",
-                  }}
+              <Box sx={{ mt: 2 }}>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ fontWeight: 600, color: "rgba(167, 243, 208, 0.95)" }}
                 >
-                  Competition snapshot
-                </p>
-                <p
-                  style={{
-                    margin: "2px 0 0",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    color: "#f1f5f9",
-                  }}
+                  Nearby competition
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: "rgba(226, 232, 240, 0.8)" }}
                 >
                   {selectionCompetition.total > 0
                     ? `${selectionCompetition.total.toLocaleString()} nearby location${
                         selectionCompetition.total === 1 ? "" : "s"
                       }`
                     : "No competition data yet"}
-                </p>
+                </Typography>
                 {selectionCompetition.topCategories.length > 0 && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 6,
-                    }}
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    sx={{ mt: 1, flexWrap: "wrap" }}
                   >
                     {selectionCompetition.topCategories.map(
                       ({ category, label, count }) => (
-                        <span
+                        <Chip
                           key={category}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 11,
-                            background: "rgba(16, 185, 129, 0.16)",
+                          label={`${label} (${count})`}
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          sx={{
+                            bgcolor: "rgba(16, 185, 129, 0.14)",
                             color: "rgba(167, 243, 208, 0.95)",
-                            border: "1px solid rgba(16, 185, 129, 0.22)",
-                            borderRadius: 9999,
-                            padding: "4px 10px",
+                            borderColor: "rgba(16, 185, 129, 0.35)",
                           }}
-                        >
-                          {label}
-                          <span
-                            style={{
-                              fontWeight: 600,
-                              color: "rgba(16, 185, 129, 0.95)",
-                              background: "rgba(16, 185, 129, 0.12)",
-                              padding: "1px 6px",
-                              borderRadius: 9999,
-                            }}
-                          >
-                            {count}
-                          </span>
-                        </span>
+                        />
                       )
                     )}
-                  </div>
+                  </Stack>
                 )}
-              </div>
+              </Box>
             )}
-          </div>
-          <div
-            style={{
-              padding: "12px 20px 18px",
-              borderTop: "1px solid rgba(148, 163, 184, 0.25)",
-              overflowY: "auto",
-              maxHeight: 260,
-            }}
-          >
-            {selectionSummary.storeCount === 0 ? (
-              <p style={{ margin: 0, fontSize: 12, color: "#cbd5f5" }}>
+          </Box>
+          <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
+          <Box sx={{ px: 2, py: 2, overflowY: "auto", maxHeight: 240 }}>
+            {displayedStores.length === 0 ? (
+              <Typography
+                variant="body2"
+                sx={{ color: "rgba(203, 213, 225, 0.85)" }}
+              >
                 No Viva Fresh locations for this selection yet.
-              </p>
+              </Typography>
             ) : (
-              selectionSummary.stores.slice(0, 6).map((store) => (
-                <div
+              displayedStores.map((store) => (
+                <Box
                   key={store.Department_Code}
-                  style={{
-                    padding: "10px 0",
+                  sx={{
+                    py: 1.5,
                     borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
+                    "&:last-of-type": { borderBottom: "none" },
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    alignItems="center"
+                    justifyContent="space-between"
                   >
-                    <strong style={{ fontSize: 13, color: "#f8fafc" }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                       {store.Department_Name}
-                    </strong>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: "rgba(251, 191, 36, 0.9)",
-                        background: "rgba(250, 204, 21, 0.1)",
-                        padding: "2px 6px",
-                        borderRadius: 9999,
-                      }}
-                    >
-                      {store.Format ?? "Unspecified"}
-                    </span>
-                  </div>
-                  <p
-                    style={{
-                      margin: "4px 0 0",
-                      fontSize: 12,
-                      color: "rgba(226, 232, 240, 0.75)",
-                    }}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={store.Format ?? "Unspecified"}
+                      color="warning"
+                      variant="outlined"
+                      sx={{ color: "rgba(250, 204, 21, 0.92)" }}
+                    />
+                  </Stack>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "rgba(226, 232, 240, 0.75)", mt: 0.5 }}
                   >
                     {store.Adresse ?? "Address coming soon"}
-                  </p>
-                  <p
-                    style={{
-                      margin: "2px 0 0",
-                      fontSize: 11,
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
                       color: "rgba(148, 163, 184, 0.75)",
+                      mt: 0.5,
+                      display: "block",
                     }}
                   >
-                    {(store.SQM ?? 0).toLocaleString()} m² · {store.Area_Name}
-                    {store.Zone_Name ? ` · ${store.Zone_Name}` : ""}
-                  </p>
-                </div>
+                    {(store.SQM ?? 0).toLocaleString()} m² • {store.Area_Name}
+                    {store.Zone_Name ? ` • ${store.Zone_Name}` : ""}
+                  </Typography>
+                </Box>
               ))
             )}
-            {selectionSummary.storeCount > 6 && (
-              <p
-                style={{
-                  margin: "12px 0 0",
-                  fontSize: 11,
-                  color: "rgba(148, 163, 184, 0.85)",
-                }}
+            {additionalStoreCount > 0 && (
+              <Typography
+                variant="caption"
+                sx={{ color: "rgba(148, 163, 184, 0.8)", display: "block", mt: 1.5 }}
               >
-                +{selectionSummary.storeCount - 6} additional location(s) in
-                view.
-              </p>
+                +{additionalStoreCount} additional location(s) in view.
+              </Typography>
             )}
-          </div>
-        </div>
+          </Box>
+        </Paper>
       )}
+  
       {businessCategories.length > 0 && (
-        <div
-          style={{
+        <Paper
+          elevation={8}
+          sx={{
             position: "absolute",
-            top: 68,
-            left: 10,
-            zIndex: 2,
-            width: 250,
-            padding: "14px 16px",
-            background: "rgba(17, 24, 39, 0.82)",
-            color: "#f9fafb",
-            borderRadius: "12px",
-            boxShadow: "0 16px 35px rgba(15,23,42,0.4)",
-            border: "1px solid rgba(148, 163, 184, 0.28)",
-            backdropFilter: "blur(6px)",
+            top: selectionSummary ? 116 : 96,
+            left: 16,
+            zIndex: 3,
+            width: 260,
+            px: 2,
+            py: 1.75,
+            borderRadius: 3,
+            backgroundColor: "rgba(15, 23, 42, 0.86)",
+            border: "1px solid rgba(148, 163, 184, 0.3)",
+            color: "rgba(226, 232, 240, 0.95)",
+            backdropFilter: "blur(10px)",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 8,
-            }}
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            justifyContent="space-between"
           >
-            <span
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "rgba(148, 163, 184, 0.75)",
-              }}
-            >
-              Competition filter
-            </span>
-            <span
-              style={{
-                fontSize: 11,
-                color: "rgba(148, 163, 184, 0.75)",
-              }}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Tune sx={{ fontSize: 18, color: "primary.light" }} />
+              <Typography
+                variant="overline"
+                sx={{ letterSpacing: 0.7, color: "rgba(148, 163, 184, 0.8)" }}
+              >
+                Competition filter
+              </Typography>
+            </Stack>
+            <Typography
+              variant="caption"
+              sx={{ color: "rgba(148, 163, 184, 0.8)" }}
             >
               {visibleCompetitionCount.toLocaleString()} shown
-            </span>
-          </div>
-          <select
-            id="business-category"
-            value={selectedCategory}
-            onChange={(event) => {
-              categorySelectionWasUserDriven.current = true;
-              setSelectedCategory(event.target.value);
-            }}
-            aria-label="Business category filter"
-            style={{
-              width: "100%",
-              padding: "8px 12px",
-              borderRadius: "8px",
-              border: "1px solid rgba(148,163,184,0.35)",
-              background: "rgba(31, 41, 55, 0.9)",
-              color: "#f8fafc",
-              fontSize: "13px",
-            }}
-          >
-            <option value="all">All categories</option>
-            {businessCategories.map((category) => (
-              <option key={category} value={category}>
-                {humanizeCategory(category)}
-              </option>
-            ))}
-          </select>
-          <p
-            style={{
-              margin: "8px 0 0",
-              fontSize: 12,
-              color: "rgba(226, 232, 240, 0.75)",
-            }}
+            </Typography>
+          </Stack>
+          <FormControl fullWidth size="small" sx={{ mt: 1.5 }}>
+            <InputLabel id="business-category-label">Category</InputLabel>
+            <Select
+              labelId="business-category-label"
+              id="business-category"
+              value={selectedCategory}
+              label="Category"
+              onChange={handleCategoryChange}
+            >
+              <MenuItem value={DEFAULT_COMPETITION_CATEGORY}>All categories</MenuItem>
+              {businessCategories.map((category) => (
+                <MenuItem key={category} value={category}>
+                  {humanizeCategory(category)}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Typography
+            variant="caption"
+            sx={{ mt: 1.5, display: "block", color: "rgba(226, 232, 240, 0.75)" }}
           >
             {selectedCategory === DEFAULT_COMPETITION_CATEGORY
               ? "Showing all nearby businesses for this focus."
               : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
-          </p>
+          </Typography>
           {visibleCompetitionCount === 0 && (
-            <p
-              style={{
-                margin: "6px 0 0",
-                fontSize: 11,
-                color: "rgba(148, 163, 184, 0.7)",
-              }}
+            <Typography
+              variant="caption"
+              sx={{ mt: 0.75, display: "block", color: "rgba(148, 163, 184, 0.7)" }}
             >
               No mapped businesses for this filter yet.
-            </p>
+            </Typography>
           )}
-        </div>
+        </Paper>
       )}
-      <div
-        style={{
+  
+      <Paper
+        elevation={6}
+        sx={{
           position: "absolute",
-          left: 10,
-          bottom: 20,
-          zIndex: 2,
-          width: 230,
-          padding: "12px 16px",
-          background: "rgba(17, 24, 39, 0.78)",
-          color: "#f1f5f9",
-          borderRadius: 12,
-          boxShadow: "0 16px 32px rgba(15,23,42,0.38)",
-          border: "1px solid rgba(148, 163, 184, 0.24)",
-          backdropFilter: "blur(6px)",
+          left: 16,
+          bottom: 24,
+          zIndex: 3,
+          width: 240,
+          px: 2,
+          py: 1.75,
+          borderRadius: 3,
+          backgroundColor: "rgba(15, 23, 42, 0.82)",
+          border: "1px solid rgba(148, 163, 184, 0.28)",
+          color: "rgba(226, 232, 240, 0.9)",
+          backdropFilter: "blur(10px)",
         }}
       >
-        <p
-          style={{
-            margin: 0,
-            fontSize: 11,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "rgba(148, 163, 184, 0.7)",
-          }}
-        >
-          Map legend
-        </p>
-        <div
-          style={{
-            marginTop: 8,
-            display: "grid",
-            gap: 8,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span
-              style={{
+        <Stack direction="row" spacing={1} alignItems="center">
+          <MapOutlined sx={{ fontSize: 18, color: "primary.light" }} />
+          <Typography variant="overline" sx={{ letterSpacing: 0.7 }}>
+            Map legend
+          </Typography>
+        </Stack>
+        <Stack spacing={1.25} sx={{ mt: 1 }}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Box
+              sx={{
                 width: 14,
                 height: 14,
                 borderRadius: "50%",
-                background: "#ef4444",
+                bgcolor: "#ef4444",
                 border: "2px solid rgba(248, 250, 252, 0.7)",
                 opacity: 0.85,
               }}
             />
-            <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
+            <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.85)" }}>
               Viva Fresh stores
-            </span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span
-              style={{
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Box
+              sx={{
                 width: 16,
                 height: 16,
                 borderRadius: "50%",
-                background: "#f97316",
+                bgcolor: "#f97316",
                 border: "2px solid rgba(255, 255, 255, 0.8)",
               }}
             />
-            <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
+            <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.85)" }}>
               Focused stores
-            </span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span
-              style={{
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Box
+              sx={{
                 width: 14,
                 height: 14,
                 borderRadius: "50%",
-                background: "#10b981",
+                bgcolor: "#10b981",
                 border: "2px solid rgba(248, 250, 252, 0.7)",
               }}
             />
-            <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
+            <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.85)" }}>
               Nearby competition
-            </span>
-          </div>
-        </div>
-        <p
-          style={{
-            margin: "10px 0 0",
-            fontSize: 10,
-            color: "rgba(148, 163, 184, 0.6)",
-          }}
+            </Typography>
+          </Stack>
+        </Stack>
+        <Typography
+          variant="caption"
+          sx={{ mt: 1, color: "rgba(148, 163, 184, 0.65)" }}
         >
           Zoom in to reveal detailed labels.
-        </p>
-      </div>
-      <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
-    </div>
+        </Typography>
+      </Paper>
+  
+      <Box
+        ref={mapContainer}
+        sx={{
+          width: "100%",
+          height: "100%",
+          borderRadius: 2,
+          overflow: "hidden",
+        }}
+      />
+    </Box>
   );
+
 }
