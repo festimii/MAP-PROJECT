@@ -7,25 +7,9 @@ import type {
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
 
-export type MapSelection =
-  | { mode: "city"; city: string }
-  | { mode: "area"; area: string; cities: string[] }
-  | { mode: "zone"; zone: string; cities: string[]; areas: string[] };
-
-export type StoreData = {
-  Area_Code: string;
-  Area_Name: string;
-  Zone_Code?: string | null;
-  Zone_Name?: string | null;
-  Department_Code: string;
-  Department_Name: string;
-  SQM: number | null;
-  Longitude: number | null;
-  Latitude: number | null;
-  Adresse: string | null;
-  Format: string | null;
-  City_Name?: string;
-};
+import { buildApiUrl } from "../config/apiConfig";
+import type { MapSelection, StoreData } from "../models/map";
+import type { City } from "../models/viva";
 
 type NearbyBusiness = {
   OSM_Id: number;
@@ -81,7 +65,7 @@ const normalizeName = (value: string) => value.toLowerCase().trim();
 
 type MapViewProps = {
   selection: MapSelection | null;
-  cities: { City_Code: number; City_Name: string }[];
+  cities: City[];
   stores?: StoreData[];
 };
 
@@ -780,7 +764,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
         if (!storesForSource.length) {
           try {
-            const storesRes = await fetch("http://localhost:4000/api/zones");
+            const storesRes = await fetch(buildApiUrl("/zones"));
             if (storesRes.ok) {
               const raw: ZoneApiStore[] = await storesRes.json();
               const collected: StoreData[] = [];
@@ -1132,7 +1116,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
         try {
           const businessesRes = await fetch(
-            "http://localhost:4000/api/combined/stores-with-businesses"
+            buildApiUrl("/combined/stores-with-businesses")
           );
 
           if (businessesRes.ok) {
@@ -1286,7 +1270,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       total: relevantBusinesses.length,
       topCategories,
     };
-  }, [selection, filterBusinessFeaturesBySelection, businessCategories]);
+  }, [selection, filterBusinessFeaturesBySelection]);
 
   const visibleCompetitionCount = useMemo(() => {
     if (!selection) {
@@ -1305,12 +1289,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     return relevantBusinesses.filter(
       (feature) => feature.properties?.category === selectedCategory
     ).length;
-  }, [
-    selection,
-    selectedCategory,
-    filterBusinessFeaturesBySelection,
-    businessCategories,
-  ]);
+  }, [selection, selectedCategory, filterBusinessFeaturesBySelection]);
 
   const selectionSummary = useMemo(() => {
     if (!selection) {
