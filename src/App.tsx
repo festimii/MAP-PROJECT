@@ -10,7 +10,6 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
-import { Menu as MenuIcon } from "@mui/icons-material";
 import { Route, Routes, useNavigate } from "react-router-dom";
 
 import MapView from "./components/MapView";
@@ -22,8 +21,8 @@ import type { MapSelection } from "./models/map";
 import { darkTheme } from "./theme/darkTheme";
 import { formatNumber } from "./utils/format";
 
-const drawerWidth = 300;
-const appBarHeight = { xs: 72, md: 80 } as const;
+const drawerWidth = 280;
+const appBarHeight = { xs: 20, md: 25 } as const;
 
 const resolveMapSelection = (
   filterMode: FilterMode,
@@ -65,15 +64,16 @@ export default function App() {
     const cityCount = cityItems.length;
     const areaCount = areaItems.length;
     const storeCount = stores.length;
-    const totalSqm = cityItems.reduce((total, city) => total + city.totalSqm, 0);
+    const totalSqm = cityItems.reduce(
+      (total, city) => total + city.totalSqm,
+      0
+    );
     const geocodedCount = cityItems.reduce(
       (total, city) => total + city.geocodedCount,
       0
     );
     const geoCoverage =
-      storeCount > 0
-        ? Math.round((geocodedCount / storeCount) * 100)
-        : 0;
+      storeCount > 0 ? Math.round((geocodedCount / storeCount) * 100) : 0;
 
     return {
       cityCount,
@@ -132,7 +132,6 @@ export default function App() {
   const handleSelectItem = (item: SidebarItem) => {
     setSelectedItem(item);
     if (item.type === "city") {
-      navigate(`/report/${encodeURIComponent(item.name)}`);
     }
   };
 
@@ -162,35 +161,18 @@ export default function App() {
           <Toolbar
             sx={{
               minHeight: appBarHeight,
-              px: { xs: 2.25, lg: 3 },
-              py: { xs: 1.25, md: 1.5 },
-              gap: { xs: 2, md: 2.5 },
+
               alignItems: { xs: "flex-start", md: "center" },
               flexWrap: { xs: "wrap", md: "nowrap" },
             }}
           >
             <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-              <Box
-                sx={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: "14px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  bgcolor: "rgba(59, 130, 246, 0.16)",
-                  border: "1px solid rgba(59, 130, 246, 0.32)",
-                  color: "primary.light",
-                  boxShadow: "0 12px 28px rgba(8, 15, 30, 0.45)",
-                }}
-              >
-                <MenuIcon sx={{ fontSize: 22 }} />
-              </Box>
+              <Box></Box>
               <Box>
                 <Typography
                   variant="h6"
                   noWrap
-                  sx={{ fontWeight: 700, letterSpacing: 0.4 }}
+                  sx={{ fontWeight: 400, letterSpacing: 0.4 }}
                 >
                   Viva Fresh — Demografia
                 </Typography>
@@ -218,9 +200,9 @@ export default function App() {
                   key={label}
                   sx={{
                     px: 2,
-                    py: 1.25,
+                    py: 0.25,
                     borderRadius: 2,
-                    minWidth: 120,
+                    minWidth: 100,
                     bgcolor: "rgba(15, 23, 42, 0.55)",
                     border: "1px solid rgba(148, 163, 184, 0.2)",
                     boxShadow: "0 16px 30px rgba(8, 15, 30, 0.35)",

@@ -17,11 +17,7 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
-import {
-  Layers,
-  LocationCity,
-  Map as MapIcon,
-} from "@mui/icons-material";
+import { Layers, LocationCity, Map as MapIcon } from "@mui/icons-material";
 
 import type {
   FilterMode,
@@ -47,7 +43,9 @@ interface SidebarProps {
 
 const getSecondaryText = (item: SidebarItem): string => {
   if (item.type === "city") {
-    const parts = [`${item.storeCount} store${item.storeCount === 1 ? "" : "s"}`];
+    const parts = [
+      `${item.storeCount} store${item.storeCount === 1 ? "" : "s"}`,
+    ];
     if (item.areaCount > 0) {
       parts.push(`${item.areaCount} area${item.areaCount === 1 ? "" : "s"}`);
     }
@@ -88,7 +86,9 @@ const getSecondaryText = (item: SidebarItem): string => {
     `${item.areas.length} area${item.areas.length === 1 ? "" : "s"}`,
   ];
   if (item.cities.length > 0) {
-    parts.push(`${item.cities.length} cit${item.cities.length === 1 ? "y" : "ies"}`);
+    parts.push(
+      `${item.cities.length} cit${item.cities.length === 1 ? "y" : "ies"}`
+    );
   }
   if (item.totalSqm > 0) {
     parts.push(`${formatNumber(item.totalSqm)} m²`);
@@ -107,9 +107,15 @@ const getSecondaryText = (item: SidebarItem): string => {
   return parts.join(" • ");
 };
 
-const toolbarOffsetSx = { minHeight: { xs: 92, md: 104 } } as const;
+const toolbarOffsetSx = { minHeight: { xs: 0, md: 0 } } as const;
 
-const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => void }) => {
+const AreaDetail = ({
+  area,
+  onBack,
+}: {
+  area: SidebarAreaItem;
+  onBack: () => void;
+}) => {
   const areaGeoCoverage =
     area.storeCount > 0
       ? Math.round((area.geocodedCount / area.storeCount) * 100)
@@ -156,10 +162,16 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
           <Chip
             size="small"
             color="primary"
-            label={`${area.storeCount} ${area.storeCount === 1 ? "store" : "stores"}`}
+            label={`${area.storeCount} ${
+              area.storeCount === 1 ? "store" : "stores"
+            }`}
           />
           {area.totalSqm > 0 && (
-            <Chip size="small" variant="outlined" label={`${formatNumber(area.totalSqm)} m²`} />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={`${formatNumber(area.totalSqm)} m²`}
+            />
           )}
           <Chip size="small" variant="outlined" label={geoChipLabel} />
           <Chip size="small" variant="outlined" label={zoneChipLabel} />
@@ -193,11 +205,13 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
             variant="outlined"
             sx={{
               borderRadius: 3,
-              transition: "all 0.2s ease",
-              "&:hover": {
-                boxShadow: "0 18px 32px rgba(8, 15, 30, 0.4)",
-                borderColor: "rgba(59, 130, 246, 0.4)",
-              },
+              minHeight: 80, // ✅ force height
+              minWidth: 40, // ✅ force square feel
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center", // ✅ center data
+              alignItems: "center",
+              p: 2, // ✅ inner padding
             }}
           >
             <CardActionArea
@@ -211,7 +225,7 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
                   variant="caption"
                   sx={{ color: "text.secondary", display: "block" }}
                 >
-                  Store area: {" "}
+                  Store area:{" "}
                   {department.SQM != null
                     ? `${formatNumber(department.SQM)} m²`
                     : "N/A"}
@@ -249,7 +263,13 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
   );
 };
 
-const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => void }) => {
+const ZoneDetail = ({
+  zone,
+  onBack,
+}: {
+  zone: SidebarZoneItem;
+  onBack: () => void;
+}) => {
   const zoneGeoCoverage =
     zone.storeCount > 0
       ? Math.round((zone.geocodedCount / zone.storeCount) * 100)
@@ -292,15 +312,23 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
           <Chip
             size="small"
             color="primary"
-            label={`${zone.storeCount} ${zone.storeCount === 1 ? "store" : "stores"}`}
+            label={`${zone.storeCount} ${
+              zone.storeCount === 1 ? "store" : "stores"
+            }`}
           />
           {zone.totalSqm > 0 && (
-            <Chip size="small" variant="outlined" label={`${formatNumber(zone.totalSqm)} m²`} />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={`${formatNumber(zone.totalSqm)} m²`}
+            />
           )}
           <Chip
             size="small"
             variant="outlined"
-            label={`Geo ${zone.geocodedCount}/${zone.storeCount || 1} (${zoneGeoCoverage}%)`}
+            label={`Geo ${zone.geocodedCount}/${
+              zone.storeCount || 1
+            } (${zoneGeoCoverage}%)`}
           />
           <Chip size="small" variant="outlined" label={regionChipLabel} />
         </Stack>
@@ -358,14 +386,14 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
                 variant="caption"
                 sx={{ color: "text.secondary", display: "block" }}
               >
-                {department.Area_Name || "Unknown area"} · {" "}
+                {department.Area_Name || "Unknown area"} ·{" "}
                 {department.City_Name || "Unknown city"}
               </Typography>
               <Typography
                 variant="caption"
                 sx={{ color: "text.secondary", display: "block" }}
               >
-                Store area: {" "}
+                Store area:{" "}
                 {department.SQM != null
                   ? `${formatNumber(department.SQM)} m²`
                   : "N/A"}
@@ -544,7 +572,10 @@ const ListView = ({
 
       <Divider sx={{ mx: 2.5, borderColor: "divider" }} />
       <Box sx={{ px: 2.5, pb: 2 }}>
-        <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
+        <Typography
+          variant="caption"
+          sx={{ color: "text.secondary", display: "block" }}
+        >
           © 2025 Viva Fresh
         </Typography>
       </Box>
@@ -565,9 +596,13 @@ const Sidebar = ({
   zoneItems,
 }: SidebarProps) => {
   const areaItem =
-    filterMode === "area" && selectedItem?.type === "area" ? selectedItem : null;
+    filterMode === "area" && selectedItem?.type === "area"
+      ? selectedItem
+      : null;
   const zoneItem =
-    filterMode === "zone" && selectedItem?.type === "zone" ? selectedItem : null;
+    filterMode === "zone" && selectedItem?.type === "zone"
+      ? selectedItem
+      : null;
 
   if (areaItem) {
     return <AreaDetail area={areaItem} onBack={onBack} />;
