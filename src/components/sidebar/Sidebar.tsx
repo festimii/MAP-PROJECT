@@ -107,6 +107,8 @@ const getSecondaryText = (item: SidebarItem): string => {
   return parts.join(" • ");
 };
 
+const toolbarOffsetSx = { minHeight: { xs: 92, md: 104 } } as const;
+
 const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => void }) => {
   const areaGeoCoverage =
     area.storeCount > 0
@@ -125,7 +127,7 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <Toolbar />
+      <Toolbar sx={toolbarOffsetSx} />
       <Box sx={{ px: 2, py: 1 }}>
         <Button variant="outlined" size="small" onClick={onBack} sx={{ mb: 2 }}>
           ← Back to Areas
@@ -232,7 +234,7 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
 
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <Toolbar />
+      <Toolbar sx={toolbarOffsetSx} />
       <Box sx={{ px: 2, py: 1 }}>
         <Button variant="outlined" size="small" onClick={onBack} sx={{ mb: 2 }}>
           ← Back to Zones
@@ -356,7 +358,7 @@ const ListView = ({
         bgcolor: "background.paper",
       }}
     >
-      <Toolbar />
+      <Toolbar sx={toolbarOffsetSx} />
       <Box sx={{ px: 2, py: 1 }}>
         <ToggleButtonGroup
           value={filterMode}

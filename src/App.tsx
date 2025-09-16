@@ -22,6 +22,7 @@ import { darkTheme } from "./theme/darkTheme";
 import { formatNumber } from "./utils/format";
 
 const drawerWidth = 300;
+const appBarHeight = { xs: 92, md: 104 } as const;
 
 const resolveMapSelection = (
   filterMode: FilterMode,
@@ -153,6 +154,8 @@ export default function App() {
           elevation={1}
           sx={{
             zIndex: (theme) => theme.zIndex.drawer + 1,
+            ml: `${drawerWidth}px`,
+            width: `calc(100% - ${drawerWidth}px)`,
             background:
               "linear-gradient(120deg, rgba(15,23,42,0.95) 0%, rgba(30,64,175,0.82) 60%, rgba(12,74,110,0.85) 100%)",
             borderBottom: "1px solid rgba(148, 163, 184, 0.25)",
@@ -161,6 +164,7 @@ export default function App() {
         >
           <Toolbar
             sx={{
+              minHeight: appBarHeight,
               px: { xs: 2, lg: 3 },
               py: { xs: 1.5, md: 2 },
               gap: 3,
@@ -296,7 +300,7 @@ export default function App() {
             height: "100vh",
           }}
         >
-          <Toolbar sx={{ minHeight: { xs: 92, md: 104 } }} />
+          <Toolbar sx={{ minHeight: appBarHeight }} />
           <Box sx={{ flex: 1, minHeight: 0 }}>
             <Routes>
               <Route
