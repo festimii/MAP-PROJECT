@@ -24,6 +24,5 @@ app.use("/api/osm", osmRoutes);
 app.use("/api/combined", combinedRoutes);
 
 const PORT = 4000;
-app.listen(PORT, () =>
-  console.log(`🚀 API running at http://localhost:${PORT}`)
-);
+const host = "0.0.0.0";
+app.listen(PORT, () => console.log(`🚀 API running at http://${host}:${PORT}`));
