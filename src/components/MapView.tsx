@@ -74,16 +74,7 @@ type BusinessProperties = {
   address: string | null;
   storeDepartment: string;
   areaName: string;
-  areaNormalized: string;
   cityName?: string;
-  cityNormalized?: string;
-  zoneName?: string;
-  zoneNormalized?: string;
-};
-
-type BusinessSummary = {
-  total: number;
-  categories: { category: string; label: string; count: number }[];
 };
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
@@ -156,8 +147,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>(
     "supermarket"
   );
-  const [visibleBusinessSummary, setVisibleBusinessSummary] =
-    useState<BusinessSummary | null>(null);
   const selectedCategoryRef = useRef(selectedCategory);
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
@@ -168,67 +157,18 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
   const updateBusinessSource = useCallback(
     (map: MapLibreMap, category: string) => {
-      const features = businessFeaturesRef.current;
-      const selectionValue = selectionRef.current;
+      const source = map.getSource("businesses") as maplibregl.GeoJSONSource | null;
+      if (!source) {
+        return;
+      }
 
-      const filteredByCategory =
+      const features = businessFeaturesRef.current;
+      const filtered =
         category === "all"
           ? features
           : features.filter(
               (feature) => feature.properties.category === category
             );
-
-      let filtered: GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[] = [];
-
-      if (selectionValue) {
-        const normalizedTarget =
-          selectionValue.mode === "city"
-            ? normalizeName(selectionValue.city)
-            : selectionValue.mode === "area"
-            ? normalizeName(selectionValue.area)
-            : normalizeName(selectionValue.zone);
-
-        filtered = filteredByCategory.filter((feature) => {
-          const props = feature.properties;
-
-          if (selectionValue.mode === "city") {
-            return props.cityNormalized === normalizedTarget;
-          }
-
-          if (selectionValue.mode === "area") {
-            return props.areaNormalized === normalizedTarget;
-          }
-
-          return props.zoneNormalized === normalizedTarget;
-        });
-
-        const categoryCounts = new Map<string, number>();
-        for (const feature of filtered) {
-          const key = feature.properties.category;
-          categoryCounts.set(key, (categoryCounts.get(key) ?? 0) + 1);
-        }
-
-        const topCategories = Array.from(categoryCounts.entries())
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([key, count]) => ({
-            category: key,
-            label: humanizeCategory(key),
-            count,
-          }));
-
-        setVisibleBusinessSummary({
-          total: filtered.length,
-          categories: topCategories,
-        });
-      } else {
-        setVisibleBusinessSummary(null);
-      }
-
-      const source = map.getSource("businesses") as maplibregl.GeoJSONSource | null;
-      if (!source) {
-        return;
-      }
 
       const featureCollection: GeoJSON.FeatureCollection<
         GeoJSON.Point,
@@ -240,7 +180,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
       source.setData(featureCollection);
     },
-    [businessFeaturesRef, setVisibleBusinessSummary]
+    [businessFeaturesRef]
   );
 
   const applySelectionToMap = useCallback(() => {
@@ -259,13 +199,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
     const selectionValue = selectionRef.current;
     let selectedCityNames: string[] = [];
-
-    const toggleLayerVisibility = (layerId: string, show: boolean) => {
-      if (!map.getLayer(layerId)) {
-        return;
-      }
-      map.setLayoutProperty(layerId, "visibility", show ? "visible" : "none");
-    };
 
     let storeHighlightFilter: FilterSpecification = [
       "all",
@@ -315,13 +248,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       )
     );
     const hasCitySelection = cleanedNames.length > 0;
-    const hasSelection = Boolean(selectionValue);
-
-    toggleLayerVisibility("clusters", !hasSelection);
-    toggleLayerVisibility("cluster-count", !hasSelection);
-    toggleLayerVisibility("store-points", !hasSelection);
-    toggleLayerVisibility("store-points-highlight", hasSelection);
-    toggleLayerVisibility("business-points", hasSelection);
 
     const highlightFilter: FilterSpecification = hasCitySelection
       ? (["in", nameKey, ...cleanedNames] as unknown as FilterSpecification)
@@ -360,16 +286,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         "store-labels",
         "visibility",
         shouldShowLabels ? "visible" : "none"
-      );
-    }
-
-    if (map.getLayer("business-labels")) {
-      const zoom = map.getZoom();
-      const shouldShowBusinessLabels = hasSelection && zoom >= 12;
-      map.setLayoutProperty(
-        "business-labels",
-        "visibility",
-        shouldShowBusinessLabels ? "visible" : "none"
       );
     }
 
@@ -448,22 +364,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   useEffect(() => {
     selectionRef.current = selection;
     applySelectionToMap();
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    const refreshBusinesses = () => {
-      updateBusinessSource(map, selectedCategoryRef.current);
-    };
-
-    if (!map.isStyleLoaded()) {
-      map.once("load", refreshBusinesses);
-      return;
-    }
-
-    refreshBusinesses();
-  }, [selection, applySelectionToMap, updateBusinessSource]);
+  }, [selection, applySelectionToMap]);
 
   useEffect(() => {
     if (stores === undefined) {
@@ -769,7 +670,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               map.setLayoutProperty(
                 "business-labels",
                 "visibility",
-                hasSelection && zoomLevel >= 12 ? "visible" : "none"
+                zoomLevel >= 12 ? "visible" : "none"
               );
             }
           });
@@ -879,7 +780,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           id: "business-points",
           type: "circle",
           source: "businesses",
-          minzoom: 9,
           paint: {
             "circle-radius": 5,
             "circle-color": "#10b981",
@@ -940,16 +840,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 return [];
               }
 
-              const areaName = store.Area_Name ?? "Unknown area";
-              const areaNormalized = normalizeName(areaName);
-              const fallbackCity =
-                store.City_Name && store.City_Name.trim().length > 0
-                  ? store.City_Name
-                  : areaName.replace(/ Area$/i, "");
-              const cityNormalized = normalizeName(fallbackCity);
-              const zoneName = store.Zone_Name ?? "Unassigned Zone";
-              const zoneNormalized = normalizeName(zoneName);
-
               return store.NearbyBusinesses.filter(
                 (b) => b.Longitude && b.Latitude
               ).map((business) => {
@@ -976,12 +866,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     ),
                     address: business.Address,
                     storeDepartment: store.Department_Name,
-                    areaName,
-                    areaNormalized,
-                    cityName: fallbackCity,
-                    cityNormalized,
-                    zoneName,
-                    zoneNormalized,
+                    areaName: store.Area_Name,
+                    cityName: store.City_Name,
                   },
                 } satisfies GeoJSON.Feature<
                   GeoJSON.Point,
@@ -1416,97 +1302,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               </div>
             ))}
           </div>
-          {visibleBusinessSummary && (
-            <div
-              style={{
-                padding: "12px 20px 14px",
-                borderTop: "1px solid rgba(148, 163, 184, 0.25)",
-                background: "rgba(15, 23, 42, 0.55)",
-              }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Competition signals
-              </p>
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: 13,
-                  color: "rgba(226, 232, 240, 0.9)",
-                  lineHeight: 1.5,
-                }}
-              >
-                {visibleBusinessSummary.total.toLocaleString()} {
-                  selectedCategory === "all"
-                    ? "business locations"
-                    : `${humanizeCategory(selectedCategory)} competitors`
-                } inside this {" "}
-                {selectionSummary.mode === "city"
-                  ? "city"
-                  : selectionSummary.mode === "area"
-                  ? "area"
-                  : "zone"}
-                .
-              </p>
-              <p
-                style={{
-                  margin: "4px 0 0",
-                  fontSize: 11,
-                  color: "rgba(148, 163, 184, 0.7)",
-                }}
-              >
-                Filter: {" "}
-                {selectedCategory === "all"
-                  ? "All categories"
-                  : humanizeCategory(selectedCategory)}
-              </p>
-              {visibleBusinessSummary.total === 0 ? (
-                <p
-                  style={{
-                    margin: "8px 0 0",
-                    fontSize: 12,
-                    color: "rgba(148, 163, 184, 0.75)",
-                  }}
-                >
-                  No competition records match this focus yet.
-                </p>
-              ) : (
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 6,
-                  }}
-                >
-                  {visibleBusinessSummary.categories.map((category) => (
-                    <span
-                      key={category.category}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "2px 8px",
-                        borderRadius: 9999,
-                        fontSize: 11,
-                        background: "rgba(16, 185, 129, 0.15)",
-                        color: "rgba(110, 231, 183, 0.95)",
-                        border: "1px solid rgba(16, 185, 129, 0.35)",
-                      }}
-                    >
-                      {category.label}: {category.count}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <div
             style={{
               padding: "12px 20px 18px",
