@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardActionArea, CardContent } from "@mui/material";
 import {
   AppBar,
@@ -19,7 +19,12 @@ import {
   ToggleButtonGroup,
   Chip,
 } from "@mui/material";
-import { Menu as MenuIcon, LocationCity, Map, Layers } from "@mui/icons-material";
+import {
+  Menu as MenuIcon,
+  LocationCity,
+  Map as MapIcon,
+  Layers,
+} from "@mui/icons-material";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import axios from "axios";
 import MapView, { type MapSelection } from "./components/MapView";
@@ -86,7 +91,12 @@ type Zone = {
   Departments: Department[];
 };
 
-type SidebarCityItem = { code: number; name: string; type: "city" };
+type SidebarCityItem = {
+  code: number;
+  name: string;
+  type: "city";
+  storeCount: number;
+};
 type SidebarAreaItem = {
   code: string;
   name: string;
@@ -94,6 +104,7 @@ type SidebarAreaItem = {
   cities: string[];
   Departments: Department[];
   zoneName?: string | null;
+  zoneCode?: string | null;
 };
 type SidebarZoneItem = {
   code: string;
@@ -102,6 +113,7 @@ type SidebarZoneItem = {
   cities: string[];
   areas: string[];
   Departments: Department[];
+  zoneCode?: string | null;
 };
 
 type SidebarItem = SidebarCityItem | SidebarAreaItem | SidebarZoneItem;
@@ -116,17 +128,59 @@ export default function App() {
   const [zoneList, setZoneList] = useState<Zone[]>([]);
   const navigate = useNavigate();
 
+  const cityStoreCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    areaList.forEach((area) => {
+      area.Departments.forEach((department) => {
+        const rawName = department.City_Name || area.Area_Name;
+        const cityName = rawName ? rawName.trim() : "Unknown";
+        counts.set(cityName, (counts.get(cityName) ?? 0) + 1);
+      });
+    });
+    return counts;
+  }, [areaList]);
+
   // Load cities and areas
   useEffect(() => {
     axios
       .get<City[]>("http://localhost:4000/api/cities")
-      .then((res) => setCityList(res.data));
+      .then((res) =>
+        setCityList(
+          res.data.map((city) => ({
+            ...city,
+            City_Name: city.City_Name.trim(),
+          }))
+        )
+      );
     axios
       .get<Area[]>("http://localhost:4000/api/areas/filters")
-      .then((res) => setAreaList(res.data));
+      .then((res) => {
+        const sorted = res.data
+          .map((area) => ({
+            ...area,
+            Cities: [...area.Cities].sort((a, b) => a.localeCompare(b)),
+            Departments: [...area.Departments].sort((a, b) =>
+              a.Department_Name.localeCompare(b.Department_Name)
+            ),
+          }))
+          .sort((a, b) => a.Area_Name.localeCompare(b.Area_Name));
+        setAreaList(sorted);
+      });
     axios
       .get<Zone[]>("http://localhost:4000/api/zones")
-      .then((res) => setZoneList(res.data));
+      .then((res) => {
+        const sorted = res.data
+          .map((zone) => ({
+            ...zone,
+            Cities: [...zone.Cities].sort((a, b) => a.localeCompare(b)),
+            Areas: [...zone.Areas].sort((a, b) => a.localeCompare(b)),
+            Departments: [...zone.Departments].sort((a, b) =>
+              a.Department_Name.localeCompare(b.Department_Name)
+            ),
+          }))
+          .sort((a, b) => a.Zone_Name.localeCompare(b.Zone_Name));
+        setZoneList(sorted);
+      });
   }, []);
 
   const handleFilterModeChange = (
@@ -180,6 +234,14 @@ export default function App() {
       : null;
 
   if (areaItem) {
+    const areaStoreCount = areaItem.Departments.length;
+    const totalAreaSqm = areaItem.Departments.reduce(
+      (sum, department) => sum + (department.SQM ?? 0),
+      0
+    );
+    const areaCityLabel = areaItem.cities.length
+      ? areaItem.cities.join(", ")
+      : "To be confirmed";
     // Detail mode (Area with departments)
     drawerContent = (
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -195,10 +257,21 @@ export default function App() {
           </Button>
           <Typography variant="h6">{areaItem.name}</Typography>
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            Cities: {areaItem.cities.join(", ")}
+            Cities ({areaItem.cities.length}): {areaCityLabel}
           </Typography>
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
             Zone: {areaItem.zoneName ?? "Unassigned"}
+          </Typography>
+          {areaItem.zoneCode && (
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+              Zone code: {areaItem.zoneCode}
+            </Typography>
+          )}
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Stores tracked: {areaStoreCount}
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Total SQM: {totalAreaSqm.toLocaleString()} m²
           </Typography>
         </Box>
 
@@ -261,6 +334,13 @@ export default function App() {
       </Box>
     );
   } else if (zoneItem) {
+    const zoneStoreCount = zoneItem.Departments.length;
+    const zoneTotalSqm = zoneItem.Departments.reduce(
+      (sum, department) => sum + (department.SQM ?? 0),
+      0
+    );
+    const hasAreas = zoneItem.areas.length > 0;
+    const hasCities = zoneItem.cities.length > 0;
     drawerContent = (
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <Toolbar />
@@ -274,21 +354,50 @@ export default function App() {
             ← Back to Zones
           </Button>
           <Typography variant="h6">{zoneItem.name}</Typography>
+          {zoneItem.zoneCode && (
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+              Zone code: {zoneItem.zoneCode}
+            </Typography>
+          )}
+          <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.5 }}>
+            Stores tracked: {zoneStoreCount}
+          </Typography>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Total SQM: {zoneTotalSqm.toLocaleString()} m²
+          </Typography>
           <Typography variant="body2" sx={{ color: "text.secondary", mt: 1 }}>
-            Areas covered
+            Areas covered ({zoneItem.areas.length})
           </Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.5 }}>
-            {zoneItem.areas.map((area) => (
-              <Chip key={area} label={area} size="small" />
-            ))}
+            {hasAreas ? (
+              zoneItem.areas.map((area) => (
+                <Chip key={area} label={area} size="small" />
+              ))
+            ) : (
+              <Typography
+                variant="caption"
+                sx={{ color: "text.secondary" }}
+              >
+                Areas will be assigned soon.
+              </Typography>
+            )}
           </Box>
           <Typography variant="body2" sx={{ color: "text.secondary", mt: 1 }}>
-            Cities linked
+            Cities linked ({zoneItem.cities.length})
           </Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.5 }}>
-            {zoneItem.cities.map((city) => (
-              <Chip key={city} label={city} size="small" color="primary" />
-            ))}
+            {hasCities ? (
+              zoneItem.cities.map((city) => (
+                <Chip key={city} label={city} size="small" color="primary" />
+              ))
+            ) : (
+              <Typography
+                variant="caption"
+                sx={{ color: "text.secondary" }}
+              >
+                No linked cities yet.
+              </Typography>
+            )}
           </Box>
         </Box>
 
@@ -354,11 +463,15 @@ export default function App() {
     // City/Area list mode
     const items: SidebarItem[] =
       filterMode === "city"
-        ? cityList.map((c) => ({
-            code: c.City_Code,
-            name: c.City_Name,
-            type: "city" as const,
-          }))
+        ? cityList.map((c) => {
+            const cityName = c.City_Name.trim();
+            return {
+              code: c.City_Code,
+              name: cityName,
+              type: "city" as const,
+              storeCount: cityStoreCounts.get(cityName) ?? 0,
+            } satisfies SidebarCityItem;
+          })
         : filterMode === "area"
         ? areaList.map((a) => ({
             code: a.Area_Code,
@@ -366,6 +479,7 @@ export default function App() {
             cities: a.Cities,
             Departments: a.Departments,
             zoneName: a.Zone_Name,
+            zoneCode: a.Zone_Code,
             type: "area" as const,
           }))
         : zoneList.map((z) => ({
@@ -374,6 +488,7 @@ export default function App() {
             cities: z.Cities,
             areas: z.Areas,
             Departments: z.Departments,
+            zoneCode: z.Zone_Code ?? null,
             type: "zone" as const,
           }));
 
@@ -410,6 +525,7 @@ export default function App() {
                 selected={selectedItem?.code === item.code}
                 onClick={() => handleSelect(item)}
                 sx={{
+                  alignItems: "flex-start",
                   borderRadius: 2,
                   mb: 0.5,
                   "&.Mui-selected": {
@@ -423,12 +539,43 @@ export default function App() {
                   {filterMode === "city" ? (
                     <LocationCity />
                   ) : filterMode === "area" ? (
-                    <Map />
+                    <MapIcon />
                   ) : (
                     <Layers />
                   )}
                 </ListItemIcon>
-                <ListItemText primary={item.name} />
+                <ListItemText
+                  primary={item.name}
+                  secondary={(() => {
+                    if (item.type === "city") {
+                      const count = item.storeCount;
+                      return `${count} store${count === 1 ? "" : "s"}`;
+                    }
+                    if (item.type === "area") {
+                      const storeCount = item.Departments.length;
+                      const cityCount = item.cities.length;
+                      const cityLabel = cityCount === 1 ? "city" : "cities";
+                      return `${storeCount} store${
+                        storeCount === 1 ? "" : "s"
+                      } • ${cityCount} ${cityLabel}`;
+                    }
+                    const storeCount = item.Departments.length;
+                    const areaCount = item.areas.length;
+                    const areaLabel = areaCount === 1 ? "area" : "areas";
+                    return `${storeCount} store${
+                      storeCount === 1 ? "" : "s"
+                    } • ${areaCount} ${areaLabel}`;
+                  })()}
+                  secondaryTypographyProps={{
+                    sx: {
+                      color:
+                        selectedItem?.code === item.code
+                          ? "rgba(0,0,0,0.65)"
+                          : "text.secondary",
+                      fontSize: 12,
+                    },
+                  }}
+                />
               </ListItemButton>
             ))}
           </List>
