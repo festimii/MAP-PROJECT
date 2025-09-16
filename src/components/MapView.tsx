@@ -6,26 +6,13 @@ import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
+import type { City, StoreData } from "../types/viva";
+export type { StoreData } from "../types/viva";
 
 export type MapSelection =
   | { mode: "city"; city: string }
   | { mode: "area"; area: string; cities: string[] }
   | { mode: "zone"; zone: string; cities: string[]; areas: string[] };
-
-export type StoreData = {
-  Area_Code: string;
-  Area_Name: string;
-  Zone_Code?: string | null;
-  Zone_Name?: string | null;
-  Department_Code: string;
-  Department_Name: string;
-  SQM: number | null;
-  Longitude: number | null;
-  Latitude: number | null;
-  Adresse: string | null;
-  Format: string | null;
-  City_Name?: string;
-};
 
 type NearbyBusiness = {
   OSM_Id: number;
@@ -81,7 +68,7 @@ const normalizeName = (value: string) => value.toLowerCase().trim();
 
 type MapViewProps = {
   selection: MapSelection | null;
-  cities: { City_Code: number; City_Name: string }[];
+  cities: City[];
   stores?: StoreData[];
 };
 
