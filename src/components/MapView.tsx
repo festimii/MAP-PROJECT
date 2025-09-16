@@ -148,12 +148,140 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     "supermarket"
   );
   const selectedCategoryRef = useRef(selectedCategory);
+  const categorySelectionWasUserDriven = useRef(false);
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
   const selectionRef = useRef<MapSelection | null>(null);
   const [storesData, setStoresData] = useState<StoreData[]>(stores ?? []);
   const initialStoresRef = useRef<StoreData[] | undefined>(stores);
   const previousSelectionHadValue = useRef(false);
+
+  const filterBusinessFeaturesBySelection = useCallback(
+    (
+      features: GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[],
+      selectionValue: MapSelection | null
+    ) => {
+      if (!selectionValue) {
+        return [];
+      }
+
+      if (features.length === 0) {
+        return features;
+      }
+
+      switch (selectionValue.mode) {
+        case "city": {
+          const targetCity = normalizeName(selectionValue.city);
+          return features.filter((feature) => {
+            const props = feature.properties;
+            if (!props) return false;
+            const cityCandidate =
+              props.cityName && props.cityName.trim().length > 0
+                ? normalizeName(props.cityName)
+                : props.areaName
+                ? normalizeName(props.areaName.replace(/ Area$/i, ""))
+                : null;
+            if (cityCandidate && cityCandidate === targetCity) {
+              return true;
+            }
+            const areaCandidate = props.areaName
+              ? normalizeName(props.areaName)
+              : null;
+            return areaCandidate === targetCity;
+          });
+        }
+        case "area": {
+          const targetArea = normalizeName(selectionValue.area);
+          return features.filter((feature) => {
+            const areaCandidate = feature.properties?.areaName
+              ? normalizeName(feature.properties.areaName)
+              : null;
+            return areaCandidate === targetArea;
+          });
+        }
+        case "zone": {
+          const allowedAreas = new Set(
+            selectionValue.areas.map((area) => normalizeName(area))
+          );
+          const allowedCities = new Set(
+            selectionValue.cities.map((city) => normalizeName(city))
+          );
+          return features.filter((feature) => {
+            const props = feature.properties;
+            if (!props) return false;
+            const areaCandidate = props.areaName
+              ? normalizeName(props.areaName)
+              : null;
+            if (areaCandidate && allowedAreas.has(areaCandidate)) {
+              return true;
+            }
+            const cityCandidate =
+              props.cityName && props.cityName.trim().length > 0
+                ? normalizeName(props.cityName)
+                : props.areaName
+                ? normalizeName(props.areaName.replace(/ Area$/i, ""))
+                : null;
+            if (cityCandidate && allowedCities.has(cityCandidate)) {
+              return true;
+            }
+            return false;
+          });
+        }
+        default:
+          return features;
+      }
+    },
+    []
+  );
+
+  const refreshBusinessCategoryState = useCallback(
+    (selectionValue: MapSelection | null) => {
+      const relevantFeatures = filterBusinessFeaturesBySelection(
+        businessFeaturesRef.current,
+        selectionValue
+      );
+
+      const uniqueCategories = Array.from(
+        new Set(
+          relevantFeatures.map(
+            (feature) => feature.properties.category
+          )
+        )
+      ).sort();
+
+      setBusinessCategories(uniqueCategories);
+
+      const currentCategory = selectedCategoryRef.current;
+      let nextCategory = currentCategory;
+      const hasCurrentCategory =
+        currentCategory === "all" ||
+        uniqueCategories.includes(currentCategory);
+
+      if (uniqueCategories.length === 0) {
+        nextCategory = "all";
+      } else if (
+        !hasCurrentCategory ||
+        !categorySelectionWasUserDriven.current
+      ) {
+        const preferredCategory = uniqueCategories.includes("supermarket")
+          ? "supermarket"
+          : uniqueCategories[0] ?? "all";
+        nextCategory = preferredCategory;
+      }
+
+      if (nextCategory !== currentCategory) {
+        categorySelectionWasUserDriven.current = false;
+        setSelectedCategory(nextCategory);
+      }
+
+      if (uniqueCategories.length === 0) {
+        categorySelectionWasUserDriven.current = false;
+      }
+
+      return nextCategory;
+    },
+    [filterBusinessFeaturesBySelection]
+  );
 
   const updateBusinessSource = useCallback(
     (map: MapLibreMap, category: string) => {
@@ -162,11 +290,16 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         return;
       }
 
-      const features = businessFeaturesRef.current;
+      const selectionValue = selectionRef.current;
+      const relevantFeatures = filterBusinessFeaturesBySelection(
+        businessFeaturesRef.current,
+        selectionValue
+      );
+
       const filtered =
         category === "all"
-          ? features
-          : features.filter(
+          ? relevantFeatures
+          : relevantFeatures.filter(
               (feature) => feature.properties.category === category
             );
 
@@ -180,7 +313,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
       source.setData(featureCollection);
     },
-    [businessFeaturesRef]
+    [filterBusinessFeaturesBySelection]
   );
 
   const applySelectionToMap = useCallback(() => {
@@ -252,6 +385,24 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     const highlightFilter: FilterSpecification = hasCitySelection
       ? (["in", nameKey, ...cleanedNames] as unknown as FilterSpecification)
       : (["in", nameKey, ""] as unknown as FilterSpecification);
+
+    const storeVisibleFilter: FilterSpecification = selectionValue
+      ? storeHighlightFilter
+      : (["!has", "point_count"] as unknown as FilterSpecification);
+
+    const clusterVisibility = selectionValue ? "none" : "visible";
+
+    if (map.getLayer("store-points")) {
+      map.setFilter("store-points", storeVisibleFilter);
+    }
+
+    if (map.getLayer("clusters")) {
+      map.setLayoutProperty("clusters", "visibility", clusterVisibility);
+    }
+
+    if (map.getLayer("cluster-count")) {
+      map.setLayoutProperty("cluster-count", "visibility", clusterVisibility);
+    }
 
     map.setFilter("city-highlight", highlightFilter);
 
@@ -364,7 +515,31 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   useEffect(() => {
     selectionRef.current = selection;
     applySelectionToMap();
-  }, [selection, applySelectionToMap]);
+
+    const map = mapRef.current;
+    const nextCategory = refreshBusinessCategoryState(selection);
+
+    if (!map) {
+      return;
+    }
+
+    const runUpdate = () => {
+      const categoryToUse = nextCategory ?? selectedCategoryRef.current;
+      updateBusinessSource(map, categoryToUse);
+    };
+
+    if (!map.isStyleLoaded()) {
+      map.once("load", runUpdate);
+      return;
+    }
+
+    runUpdate();
+  }, [
+    selection,
+    applySelectionToMap,
+    refreshBusinessCategoryState,
+    updateBusinessSource,
+  ]);
 
   useEffect(() => {
     if (stores === undefined) {
@@ -400,6 +575,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
     businessFeaturesRef.current = [];
     setBusinessCategories([]);
+    categorySelectionWasUserDriven.current = false;
+    setSelectedCategory("all");
+    selectedCategoryRef.current = "all";
 
     const styleUrl = darkMode
       ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
@@ -781,10 +959,31 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           type: "circle",
           source: "businesses",
           paint: {
-            "circle-radius": 5,
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              3,
+              12,
+              7,
+            ],
             "circle-color": "#10b981",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 1.2,
+            "circle-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              7,
+              0,
+              8.5,
+              0.35,
+              11,
+              0.75,
+              13,
+              0.95,
+            ],
           },
         });
 
@@ -878,28 +1077,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
             businessFeaturesRef.current = features;
 
-            const uniqueCategories = Array.from(
-              new Set(features.map((feature) => feature.properties.category))
-            ).sort();
-
             if (isMounted) {
-              setBusinessCategories(uniqueCategories);
-
-              const preferredCategory = uniqueCategories.includes("supermarket")
-                ? "supermarket"
-                : uniqueCategories[0] ?? "all";
-              const currentSelection = selectedCategoryRef.current;
-              const nextCategory = uniqueCategories.length
-                ? uniqueCategories.includes(currentSelection)
-                  ? currentSelection
-                  : preferredCategory
-                : "all";
-
-              if (nextCategory !== currentSelection) {
-                setSelectedCategory(nextCategory);
-              }
-
-              updateBusinessSource(map, nextCategory);
+              const categoryToUse = refreshBusinessCategoryState(
+                selectionRef.current
+              );
+              updateBusinessSource(
+                map,
+                categoryToUse ?? selectedCategoryRef.current
+              );
             }
           }
         } catch (err) {
@@ -946,7 +1131,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       isMounted = false;
       map.remove();
     };
-  }, [navigate, cities, darkMode, updateBusinessSource, applySelectionToMap]);
+  }, [
+    navigate,
+    cities,
+    darkMode,
+    updateBusinessSource,
+    applySelectionToMap,
+    refreshBusinessCategoryState,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1414,7 +1606,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           <select
             id="business-category"
             value={selectedCategory}
-            onChange={(event) => setSelectedCategory(event.target.value)}
+            onChange={(event) => {
+              categorySelectionWasUserDriven.current = true;
+              setSelectedCategory(event.target.value);
+            }}
             style={{
               width: "100%",
               padding: "6px 10px",
