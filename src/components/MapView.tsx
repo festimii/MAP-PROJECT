@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import maplibregl, { Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
@@ -6,6 +12,9 @@ import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
+import type { CSSProperties } from "react";
+
+import { Eye, EyeOff, LocateFixed, Moon, Sun } from "lucide-react";
 
 import { buildApiUrl } from "../config/apiConfig";
 import type { MapSelection, StoreData } from "../models/map";
@@ -79,6 +88,8 @@ const humanizeCategory = (value: string) =>
 const DEFAULT_COMPETITION_CATEGORY = "all";
 const STORE_LABEL_VISIBILITY_ZOOM = 13;
 const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
+const INITIAL_MAP_CENTER: [number, number] = [21, 42.6];
+const INITIAL_MAP_ZOOM = 7.5;
 
 const createStoreBaseFilter = (): FilterSpecification =>
   ["!has", "point_count"] as unknown as FilterSpecification;
@@ -202,6 +213,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [storesData, setStoresData] = useState<StoreData[]>(stores ?? []);
   const initialStoresRef = useRef<StoreData[] | undefined>(stores);
   const previousSelectionHadValue = useRef(false);
+  const [showCompetition, setShowCompetition] = useState(true);
+  const showCompetitionRef = useRef(showCompetition);
+
+  useEffect(() => {
+    showCompetitionRef.current = showCompetition;
+  }, [showCompetition]);
 
   const filterBusinessFeaturesBySelection = useCallback(
     (
@@ -405,7 +422,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       ? createStoreBaseFilter()
       : storeHighlightFilter;
     const showCompetitionLabels =
+      showCompetitionRef.current &&
       zoomLevel >= COMPETITION_LABEL_VISIBILITY_ZOOM;
+    const competitionVisibility = showCompetitionRef.current
+      ? "visible"
+      : "none";
 
     if (map.getLayer("store-points")) {
       map.setFilter("store-points", storeBaseFilter);
@@ -480,6 +501,19 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         "store-labels",
         "visibility",
         showAllStoreLabels ? "visible" : "none"
+      );
+    }
+
+    if (map.getLayer("business-points")) {
+      map.setLayoutProperty(
+        "business-points",
+        "visibility",
+        competitionVisibility
+      );
+      map.setPaintProperty(
+        "business-points",
+        "circle-opacity",
+        showCompetitionRef.current ? 0.85 : 0
       );
     }
 
@@ -570,8 +604,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       previousSelectionHadValue.current = true;
     } else if (!selectionValue && previousSelectionHadValue.current) {
       map.easeTo({
-        center: [21, 42.6],
-        zoom: 7.5,
+        center: INITIAL_MAP_CENTER,
+        zoom: INITIAL_MAP_ZOOM,
         pitch: 0,
         bearing: 0,
         duration: 900,
@@ -642,6 +676,20 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     updateSource();
   }, [stores, applySelectionToMap]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!map.isStyleLoaded()) {
+      map.once("load", applySelectionToMap);
+      return;
+    }
+
+    applySelectionToMap();
+  }, [showCompetition, applySelectionToMap]);
+
   // Initial map setup
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -659,8 +707,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     const map: MapLibreMap = new maplibregl.Map({
       container: mapContainer.current,
       style: styleUrl,
-      center: [21, 42.6],
-      zoom: 7.5,
+      center: INITIAL_MAP_CENTER,
+      zoom: INITIAL_MAP_ZOOM,
       pitch: 0,
       bearing: 0,
     });
@@ -1368,26 +1416,134 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     };
   }, [selection, storesData]);
 
+  const handleResetView = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    map.easeTo({
+      center: INITIAL_MAP_CENTER,
+      zoom: INITIAL_MAP_ZOOM,
+      pitch: 0,
+      bearing: 0,
+      duration: 1200,
+    });
+  }, []);
+
+  const toolbarButtonStyle = (active: boolean): CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "6px 10px",
+    fontSize: 12,
+    fontWeight: 500,
+    borderRadius: 9999,
+    border: active
+      ? "1px solid rgba(59, 130, 246, 0.45)"
+      : "1px solid rgba(148, 163, 184, 0.35)",
+    background: active
+      ? "rgba(59, 130, 246, 0.18)"
+      : "rgba(30, 41, 59, 0.55)",
+    color: "#e2e8f0",
+    cursor: "pointer",
+    transition: "background 0.2s ease, border 0.2s ease, color 0.2s ease",
+  });
+
+  const competitionControlDisabled =
+    !showCompetition || businessCategories.length === 0;
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {/* Toggle button */}
-      <button
-        onClick={() => setDarkMode(!darkMode)}
+      <div
         style={{
           position: "absolute",
           top: 10,
           left: 10,
-          zIndex: 1,
-          padding: "6px 12px",
-          background: "#111",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
+          zIndex: 3,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          maxWidth: 260,
         }}
       >
-        {darkMode ? "Light Mode" : "Dark Mode"}
-      </button>
+        <div
+          style={{
+            padding: "14px 16px",
+            background: "rgba(15, 23, 42, 0.78)",
+            borderRadius: 16,
+            border: "1px solid rgba(148, 163, 184, 0.3)",
+            color: "#e2e8f0",
+            boxShadow: "0 18px 38px rgba(15,23,42,0.45)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "rgba(148, 163, 184, 0.85)",
+            }}
+          >
+            Map tools
+          </p>
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setDarkMode(!darkMode)}
+              style={toolbarButtonStyle(darkMode)}
+              aria-pressed={darkMode}
+              title={darkMode ? "Switch to light basemap" : "Switch to dark basemap"}
+            >
+              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+              <span>{darkMode ? "Light basemap" : "Dark basemap"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCompetition((prev) => !prev)}
+              style={toolbarButtonStyle(showCompetition)}
+              aria-pressed={showCompetition}
+              title={
+                showCompetition
+                  ? "Hide nearby competition"
+                  : "Show nearby competition"
+              }
+            >
+              {showCompetition ? <Eye size={16} /> : <EyeOff size={16} />}
+              <span>{showCompetition ? "Show competition" : "Competition off"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleResetView}
+              style={toolbarButtonStyle(false)}
+              title="Reset view"
+            >
+              <LocateFixed size={16} />
+              <span>Reset view</span>
+            </button>
+          </div>
+          <p
+            style={{
+              margin: "10px 0 0",
+              fontSize: 11,
+              lineHeight: 1.4,
+              color: "rgba(148, 163, 184, 0.8)",
+            }}
+          >
+            Use these quick toggles to adjust the basemap, focus on stores, or
+            jump back to the national view.
+          </p>
+        </div>
+      </div>
       {selectionSummary && (
         <div
           style={{
@@ -1659,7 +1815,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               )}
             </div>
             {selectionCompetition && (
-              <div>
+              <div
+                style={{
+                  opacity: showCompetition ? 1 : 0.75,
+                  transition: "opacity 0.2s ease",
+                }}
+              >
                 <p
                   style={{
                     margin: 0,
@@ -1677,12 +1838,25 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     color: "#f1f5f9",
                   }}
                 >
-                  {selectionCompetition.total > 0
-                    ? `${selectionCompetition.total.toLocaleString()} nearby location${
-                        selectionCompetition.total === 1 ? "" : "s"
-                      }`
-                    : "No competition data yet"}
+                  {showCompetition
+                    ? selectionCompetition.total > 0
+                      ? `${selectionCompetition.total.toLocaleString()} nearby location${
+                          selectionCompetition.total === 1 ? "" : "s"
+                        }`
+                      : "No competition data yet"
+                    : "Competition layer hidden. Enable it to visualize nearby venues."}
                 </p>
+                {!showCompetition && selectionCompetition.total > 0 && (
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: 11,
+                      color: "rgba(148, 163, 184, 0.75)",
+                    }}
+                  >
+                    Last recorded total: {selectionCompetition.total.toLocaleString()} locations.
+                  </p>
+                )}
                 {selectionCompetition.topCategories.length > 0 && (
                   <div
                     style={{
@@ -1693,35 +1867,51 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     }}
                   >
                     {selectionCompetition.topCategories.map(
-                      ({ category, label, count }) => (
-                        <span
-                          key={category}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 11,
-                            background: "rgba(16, 185, 129, 0.16)",
-                            color: "rgba(167, 243, 208, 0.95)",
-                            border: "1px solid rgba(16, 185, 129, 0.22)",
-                            borderRadius: 9999,
-                            padding: "4px 10px",
-                          }}
-                        >
-                          {label}
+                      ({ category, label, count }) => {
+                        const badgeBackground = showCompetition
+                          ? "rgba(16, 185, 129, 0.16)"
+                          : "rgba(148, 163, 184, 0.18)";
+                        const badgeBorder = showCompetition
+                          ? "1px solid rgba(16, 185, 129, 0.22)"
+                          : "1px solid rgba(148, 163, 184, 0.3)";
+                        const badgeColor = showCompetition
+                          ? "rgba(167, 243, 208, 0.95)"
+                          : "rgba(226, 232, 240, 0.8)";
+
+                        return (
                           <span
+                            key={category}
                             style={{
-                              fontWeight: 600,
-                              color: "rgba(16, 185, 129, 0.95)",
-                              background: "rgba(16, 185, 129, 0.12)",
-                              padding: "1px 6px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              background: badgeBackground,
+                              color: badgeColor,
+                              border: badgeBorder,
                               borderRadius: 9999,
+                              padding: "4px 10px",
                             }}
                           >
-                            {count}
+                            {label}
+                            <span
+                              style={{
+                                fontWeight: 600,
+                                color: showCompetition
+                                  ? "rgba(16, 185, 129, 0.95)"
+                                  : "rgba(226, 232, 240, 0.9)",
+                                background: showCompetition
+                                  ? "rgba(16, 185, 129, 0.12)"
+                                  : "rgba(148, 163, 184, 0.25)",
+                                padding: "1px 6px",
+                                borderRadius: 9999,
+                              }}
+                            >
+                              {count}
+                            </span>
                           </span>
-                        </span>
-                      )
+                        );
+                      }
                     )}
                   </div>
                 )}
@@ -1813,7 +2003,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         <div
           style={{
             position: "absolute",
-            top: 68,
+            top: 170,
             left: 10,
             zIndex: 2,
             width: 250,
@@ -1824,6 +2014,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             boxShadow: "0 16px 35px rgba(15,23,42,0.4)",
             border: "1px solid rgba(148, 163, 184, 0.28)",
             backdropFilter: "blur(6px)",
+            opacity: showCompetition ? 1 : 0.78,
+            transition: "opacity 0.2s ease",
           }}
         >
           <div
@@ -1850,7 +2042,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 color: "rgba(148, 163, 184, 0.75)",
               }}
             >
-              {visibleCompetitionCount.toLocaleString()} shown
+              {showCompetition
+                ? `${visibleCompetitionCount.toLocaleString()} shown`
+                : "Layer hidden"}
             </span>
           </div>
           <select
@@ -1861,6 +2055,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               setSelectedCategory(event.target.value);
             }}
             aria-label="Business category filter"
+            disabled={competitionControlDisabled}
             style={{
               width: "100%",
               padding: "8px 12px",
@@ -1869,6 +2064,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               background: "rgba(31, 41, 55, 0.9)",
               color: "#f8fafc",
               fontSize: "13px",
+              opacity: competitionControlDisabled ? 0.6 : 1,
+              cursor: competitionControlDisabled ? "not-allowed" : "pointer",
             }}
           >
             <option value="all">All categories</option>
@@ -1885,11 +2082,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               color: "rgba(226, 232, 240, 0.75)",
             }}
           >
-            {selectedCategory === DEFAULT_COMPETITION_CATEGORY
-              ? "Showing all nearby businesses for this focus."
-              : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
+            {showCompetition
+              ? selectedCategory === DEFAULT_COMPETITION_CATEGORY
+                ? "Showing all nearby businesses for this focus."
+                : `Focusing on ${humanizeCategory(selectedCategory)} venues.`
+              : "Competition layer hidden. Toggle \"Show competition\" to explore categories."}
           </p>
-          {visibleCompetitionCount === 0 && (
+          {showCompetition && visibleCompetitionCount === 0 && (
             <p
               style={{
                 margin: "6px 0 0",
@@ -1991,10 +2190,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 borderRadius: "50%",
                 background: "#10b981",
                 border: "2px solid rgba(248, 250, 252, 0.7)",
+                opacity: showCompetition ? 1 : 0.35,
               }}
             />
             <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
-              Nearby competition
+              {showCompetition
+                ? "Nearby competition"
+                : "Nearby competition (hidden)"}
             </span>
           </div>
         </div>
@@ -2005,7 +2207,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             color: "rgba(148, 163, 184, 0.6)",
           }}
         >
-          Zoom in to reveal detailed labels.
+          {showCompetition
+            ? "Zoom in to reveal detailed store and competition labels."
+            : "Competition insights are hidden. Toggle them back on from the Map tools panel."}
         </p>
       </div>
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
