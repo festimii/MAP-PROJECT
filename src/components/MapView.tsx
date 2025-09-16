@@ -41,7 +41,7 @@ type StoreFeatureProperties = {
   department: string;
   city: string;
   cityNormalized: string;
-  zone: string;
+  area: string;
   address: string | null;
   format: string | null;
   sqm: number;
@@ -72,17 +72,6 @@ const humanizeCategory = (value: string) =>
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ") || "Other";
 
-const fallbackZoneName = "Unassigned Zone";
-
-const formatZoneName = (value: string | null | undefined) => {
-  if (!value) {
-    return fallbackZoneName;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallbackZoneName;
-};
-
 export default function MapView({ selection, cities }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -91,17 +80,11 @@ export default function MapView({ selection, cities }: MapViewProps) {
   const businessFeaturesRef = useRef<
     GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[]
   >([]);
-  const storeFeaturesRef = useRef<
-    GeoJSON.Feature<GeoJSON.Point, StoreFeatureProperties>[]
-  >([]);
   const [businessCategories, setBusinessCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>(
     "supermarket"
   );
   const selectedCategoryRef = useRef(selectedCategory);
-  const [zoneOptions, setZoneOptions] = useState<string[]>([]);
-  const [selectedZone, setSelectedZone] = useState<string>("all");
-  const selectedZoneRef = useRef(selectedZone);
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
   const selectionRef = useRef<MapSelection | null>(null);
@@ -109,21 +92,19 @@ export default function MapView({ selection, cities }: MapViewProps) {
   const previousSelectionHadValue = useRef(false);
 
   const updateBusinessSource = useCallback(
-    (map: MapLibreMap, category: string, zoneOverride?: string) => {
+    (map: MapLibreMap, category: string) => {
       const source = map.getSource("businesses") as maplibregl.GeoJSONSource | null;
       if (!source) {
         return;
       }
 
       const features = businessFeaturesRef.current;
-      const activeZone = zoneOverride ?? selectedZoneRef.current;
-      const filtered = features.filter((feature) => {
-        const matchesCategory =
-          category === "all" || feature.properties.category === category;
-        const matchesZone =
-          activeZone === "all" || feature.properties.areaName === activeZone;
-        return matchesCategory && matchesZone;
-      });
+      const filtered =
+        category === "all"
+          ? features
+          : features.filter(
+              (feature) => feature.properties.category === category
+            );
 
       const featureCollection: GeoJSON.FeatureCollection<
         GeoJSON.Point,
@@ -286,47 +267,9 @@ export default function MapView({ selection, cities }: MapViewProps) {
     }
   }, []);
 
-  const updateStoreSource = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    const source = map.getSource("stores") as maplibregl.GeoJSONSource | null;
-    if (!source) {
-      return;
-    }
-
-    const zone = selectedZoneRef.current;
-    const baseFeatures = storeFeaturesRef.current;
-    const filteredFeatures =
-      zone === "all"
-        ? baseFeatures
-        : baseFeatures.filter((feature) => feature.properties.zone === zone);
-
-    const featureCollection: GeoJSON.FeatureCollection<
-      GeoJSON.Point,
-      StoreFeatureProperties
-    > = {
-      type: "FeatureCollection",
-      features: filteredFeatures,
-    };
-
-    source.setData(featureCollection);
-    applySelectionToMap();
-  }, [applySelectionToMap]);
-
   useEffect(() => {
     selectedCategoryRef.current = selectedCategory;
   }, [selectedCategory]);
-
-  useEffect(() => {
-    selectedZoneRef.current = selectedZone;
-  }, [selectedZone]);
-
-  useEffect(() => {
-    updateStoreSource();
-  }, [selectedZone, updateStoreSource]);
 
   useEffect(() => {
     selectionRef.current = selection;
@@ -448,66 +391,37 @@ export default function MapView({ selection, cities }: MapViewProps) {
         });
 
         // --- Store points with clustering ---
-        const storesRes = await fetch("http://localhost:4000/api/areas");
-        if (storesRes.ok) {
-          const stores: StoreData[] = await storesRes.json();
-          setStoresData(stores);
-
-          const features: GeoJSON.Feature<
-            GeoJSON.Point,
-            StoreFeatureProperties
-          >[] = stores
-            .filter((d) => d.Longitude && d.Latitude)
-            .map((d) => {
-              const zoneName = formatZoneName(d.Area_Name);
-              const rawCityName =
-                d.City_Name ?? d.Area_Name?.replace(/ Area$/i, "") ?? zoneName;
-              const cityName = rawCityName?.trim().length
-                ? rawCityName.trim()
-                : zoneName;
-
-              return {
-                type: "Feature" as const,
+          const storesRes = await fetch("http://localhost:4000/api/areas");
+          if (storesRes.ok) {
+            const stores: StoreData[] = await storesRes.json();
+            setStoresData(stores);
+            const features: GeoJSON.Feature[] = stores
+              .filter((d) => d.Longitude && d.Latitude)
+              .map((d) => ({
+                type: "Feature",
                 geometry: {
-                  type: "Point" as const,
+                  type: "Point",
                   coordinates: [d.Longitude, d.Latitude],
                 },
                 properties: {
                   department: d.Department_Name,
-                  city: cityName,
-                  cityNormalized: normalizeName(cityName),
-                  zone: zoneName,
+                  city: d.City_Name ?? d.Area_Name.replace(/ Area$/i, ""),
+                  cityNormalized: normalizeName(
+                    d.City_Name ?? d.Area_Name.replace(/ Area$/i, "")
+                  ),
+                  area: d.Area_Name,
                   address: d.Adresse ?? null,
                   format: d.Format ?? null,
                   sqm: d.SQM,
-                },
-              } satisfies GeoJSON.Feature<
-                GeoJSON.Point,
-                StoreFeatureProperties
-              >;
+                } satisfies StoreFeatureProperties,
+              }));
+
+            map.addSource("stores", {
+              type: "geojson",
+              data: { type: "FeatureCollection", features },
+              cluster: true,
+              clusterRadius: 50,
             });
-
-          storeFeaturesRef.current = features;
-
-          const uniqueZones = Array.from(
-            new Set(features.map((feature) => feature.properties.zone))
-          ).sort((a, b) => a.localeCompare(b));
-
-          setZoneOptions(uniqueZones);
-          if (
-            selectedZoneRef.current !== "all" &&
-            !uniqueZones.includes(selectedZoneRef.current)
-          ) {
-            setSelectedZone("all");
-          }
-
-          map.addSource("stores", {
-            type: "geojson",
-            data: { type: "FeatureCollection", features },
-            cluster: true,
-            clusterRadius: 48,
-            clusterMaxZoom: 14,
-          });
 
           // Cluster circles
           map.addLayer({
@@ -516,31 +430,18 @@ export default function MapView({ selection, cities }: MapViewProps) {
             source: "stores",
             filter: ["has", "point_count"],
             paint: {
-              "circle-color": [
-                "step",
-                ["get", "point_count"],
-                "#93c5fd",
-                10,
-                "#60a5fa",
-                25,
-                "#2563eb",
-                50,
-                "#1d4ed8",
-              ],
+              "circle-color": "#2563eb",
               "circle-radius": [
                 "step",
                 ["get", "point_count"],
-                18,
+                15,
                 10,
-                22,
-                25,
-                28,
+                20,
                 50,
-                36,
+                25,
               ],
-              "circle-opacity": 0.9,
-              "circle-stroke-color": "rgba(15, 23, 42, 0.55)",
-              "circle-stroke-width": 1.6,
+              "circle-stroke-color": "#fff",
+              "circle-stroke-width": 1,
             },
           });
 
@@ -552,80 +453,24 @@ export default function MapView({ selection, cities }: MapViewProps) {
             filter: ["has", "point_count"],
             layout: {
               "text-field": "{point_count_abbreviated}",
-              "text-size": 13,
-              "text-font": [
-                "Open Sans Semibold",
-                "Arial Unicode MS Bold",
-              ],
+              "text-size": 12,
             },
             paint: {
-              "text-color": "#e0f2fe",
-              "text-halo-color": "rgba(15, 23, 42, 0.85)",
-              "text-halo-width": 1.2,
+              "text-color": "#fff",
             },
           });
 
           // Individual store points
-          map.addLayer({
-            id: "store-points-glow",
-            type: "circle",
-            source: "stores",
-            filter: ["!has", "point_count"],
-            paint: {
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                7,
-                6,
-                10,
-                9,
-                12,
-                13,
-                14,
-                16,
-              ],
-              "circle-color": "rgba(239, 68, 68, 0.25)",
-              "circle-opacity": 0.55,
-              "circle-blur": 0.8,
-            },
-          });
-
           map.addLayer({
             id: "store-points",
             type: "circle",
             source: "stores",
             filter: ["!has", "point_count"],
             paint: {
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                7,
-                4,
-                10,
-                6,
-                12,
-                8.5,
-                14,
-                11,
-                16,
-                13,
-              ],
-              "circle-color": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                7,
-                "#fb7185",
-                12,
-                "#ef4444",
-                16,
-                "#dc2626",
-              ],
-              "circle-stroke-color": "rgba(15, 23, 42, 0.8)",
-              "circle-stroke-width": 1.5,
-              "circle-opacity": 0.92,
+              "circle-radius": 6,
+              "circle-color": "#ef4444",
+              "circle-stroke-color": "#fff",
+              "circle-stroke-width": 1,
             },
           });
 
@@ -639,23 +484,11 @@ export default function MapView({ selection, cities }: MapViewProps) {
               ["==", "cityNormalized", "__none__"],
             ],
             paint: {
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                7,
-                6,
-                10,
-                8,
-                12,
-                12,
-                14,
-                15,
-              ],
-              "circle-color": "#fbbf24",
-              "circle-stroke-color": "#111827",
-              "circle-stroke-width": 2.4,
-              "circle-opacity": 0.95,
+              "circle-radius": 9,
+              "circle-color": "#f97316",
+              "circle-stroke-color": "#fff",
+              "circle-stroke-width": 2,
+              "circle-opacity": 0.9,
             },
           });
 
@@ -672,15 +505,14 @@ export default function MapView({ selection, cities }: MapViewProps) {
             layout: {
               "text-field": ["get", "department"],
               "text-size": 12,
-              "text-offset": [0, 1.3],
-              "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+              "text-offset": [0, 1.2],
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
               visibility: "none",
             },
             paint: {
-              "text-color": "#0f172a",
-              "text-halo-color": "rgba(255,255,255,0.95)",
-              "text-halo-width": 1.6,
-              "text-halo-blur": 0.2,
+              "text-color": "#111827",
+              "text-halo-color": "#ffffff",
+              "text-halo-width": 2,
             },
           });
 
@@ -712,9 +544,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
             const formatLine = props.format
               ? `<div style="margin-top:4px;color:#f97316;font-weight:600">${props.format}</div>`
               : "";
-            const zoneLine = props.zone
-              ? `<div style="margin-top:4px;color:#1d4ed8;font-weight:600">Zona: ${props.zone}</div>`
-              : "";
             const addressLine = props.address
               ? `<div style="margin-top:4px;color:#6b7280">${props.address}</div>`
               : "";
@@ -727,7 +556,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 `<div style="font-family:Inter,system-ui,sans-serif;min-width:180px">
                     <strong style="font-size:14px;color:#111827">${props.department}</strong>
                     <div style="margin-top:2px;color:#1f2937;font-size:12px">${props.city}</div>
-                    ${zoneLine}
                     ${formatLine}
                     ${addressLine}
                     ${sqmLine}
@@ -743,9 +571,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
             const formatLine = props.format
               ? `<div style="margin-top:4px;color:#f97316;font-weight:600">${props.format}</div>`
               : "";
-            const zoneLine = props.zone
-              ? `<div style="margin-top:4px;color:#1d4ed8;font-weight:600">Zona: ${props.zone}</div>`
-              : "";
             const addressLine = props.address
               ? `<div style="margin-top:4px;color:#6b7280">${props.address}</div>`
               : "";
@@ -758,7 +583,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 `<div style="font-family:Inter,system-ui,sans-serif;min-width:180px">
                     <strong style="font-size:14px;color:#111827">${props.department}</strong>
                     <div style="margin-top:2px;color:#1f2937;font-size:12px">${props.city}</div>
-                    ${zoneLine}
                     ${formatLine}
                     ${addressLine}
                     ${sqmLine}
@@ -807,7 +631,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
           map.on("mouseleave", "clusters", () => {
             map.getCanvas().style.cursor = "";
           });
-          updateStoreSource();
         }
 
         map.addSource("businesses", {
@@ -879,8 +702,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 return [];
               }
 
-              const storeZone = formatZoneName(store.Area_Name);
-
               return store.NearbyBusinesses.filter(
                 (b) => b.Longitude && b.Latitude
               ).map((business) => {
@@ -907,7 +728,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
                     ),
                     address: business.Address,
                     storeDepartment: store.Department_Name,
-                    areaName: storeZone,
+                    areaName: store.Area_Name,
                     cityName: store.City_Name,
                   },
                 } satisfies GeoJSON.Feature<
@@ -940,11 +761,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 setSelectedCategory(nextCategory);
               }
 
-              updateBusinessSource(
-                map,
-                nextCategory,
-                selectedZoneRef.current
-              );
+              updateBusinessSource(map, nextCategory);
             }
           }
         } catch (err) {
@@ -991,14 +808,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
       isMounted = false;
       map.remove();
     };
-  }, [
-    navigate,
-    cities,
-    darkMode,
-    updateBusinessSource,
-    applySelectionToMap,
-    updateStoreSource,
-  ]);
+  }, [navigate, cities, darkMode, updateBusinessSource, applySelectionToMap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1007,27 +817,12 @@ export default function MapView({ selection, cities }: MapViewProps) {
     }
 
     if (!map.isStyleLoaded()) {
-      map.once("load", () =>
-        updateBusinessSource(map, selectedCategory, selectedZoneRef.current)
-      );
+      map.once("load", () => updateBusinessSource(map, selectedCategory));
       return;
     }
 
-    updateBusinessSource(map, selectedCategory, selectedZoneRef.current);
+    updateBusinessSource(map, selectedCategory);
   }, [selectedCategory, updateBusinessSource]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) {
-      return;
-    }
-
-    updateBusinessSource(
-      map,
-      selectedCategoryRef.current,
-      selectedZoneRef.current
-    );
-  }, [selectedZone, updateBusinessSource]);
 
   const selectionSummary = useMemo(() => {
     if (!selection) {
@@ -1039,15 +834,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
     const normalizedTargets = new Set(
       targetNames.map((name) => normalizeName(name))
     );
-
-    const activeZone = selectedZone === "all" ? null : selectedZone;
-    const storesToConsider = activeZone
-      ? storesData.filter(
-          (store) => formatZoneName(store.Area_Name) === activeZone
-        )
-      : storesData;
-
-    const matchingStores = storesToConsider.filter((store) => {
+    const matchingStores = storesData.filter((store) => {
       const candidateName = normalizeName(
         store.City_Name ?? store.Area_Name.replace(/ Area$/i, "")
       );
@@ -1075,9 +862,8 @@ export default function MapView({ selection, cities }: MapViewProps) {
       storeCount: matchingStores.length,
       totalSQM,
       topFormats,
-      zone: activeZone,
     };
-  }, [selection, storesData, selectedZone]);
+  }, [selection, storesData]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -1165,22 +951,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
                   {city}
                 </span>
               ))}
-              {selectionSummary.zone && (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "2px 8px",
-                    borderRadius: 9999,
-                    fontSize: 11,
-                    background: "rgba(244, 114, 182, 0.16)",
-                    color: "rgba(251, 207, 232, 0.95)",
-                    border: "1px solid rgba(244, 114, 182, 0.32)",
-                  }}
-                >
-                  Zona: {selectionSummary.zone}
-                </span>
-              )}
             </div>
           </div>
           <div
@@ -1337,112 +1107,55 @@ export default function MapView({ selection, cities }: MapViewProps) {
           </div>
         </div>
       )}
-      {(zoneOptions.length > 0 || businessCategories.length > 0) && (
+      {businessCategories.length > 0 && (
         <div
           style={{
             position: "absolute",
             top: 60,
             left: 10,
             zIndex: 1,
-            padding: "14px 16px",
-            background: "rgba(17, 24, 39, 0.88)",
+            padding: "10px",
+            background: "rgba(17, 24, 39, 0.85)",
             color: "#fff",
-            borderRadius: "12px",
-            boxShadow: "0 18px 35px rgba(15,23,42,0.45)",
-            minWidth: "240px",
-            border: "1px solid rgba(148, 163, 184, 0.3)",
-            backdropFilter: "blur(8px)",
+            borderRadius: "6px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+            minWidth: "220px",
           }}
         >
-          <p
+          <label
+            htmlFor="business-category"
             style={{
-              margin: 0,
-              fontSize: 11,
-              letterSpacing: "0.08em",
+              display: "block",
+              fontSize: "12px",
               textTransform: "uppercase",
-              color: "rgba(226, 232, 240, 0.72)",
+              letterSpacing: "0.08em",
+              marginBottom: "6px",
+              color: "#d1d5db",
             }}
           >
-            Filters
-          </p>
-          {zoneOptions.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <label
-                htmlFor="zone-filter"
-                style={{
-                  display: "block",
-                  fontSize: 12,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  marginBottom: 6,
-                  color: "rgba(191, 219, 254, 0.88)",
-                }}
-              >
-                Zona
-              </label>
-              <select
-                id="zone-filter"
-                value={selectedZone}
-                onChange={(event) => setSelectedZone(event.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "7px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(148,163,184,0.45)",
-                  background: "rgba(30, 41, 59, 0.9)",
-                  color: "#f9fafb",
-                  fontSize: 13,
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-                }}
-              >
-                <option value="all">All zones</option>
-                {zoneOptions.map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          {businessCategories.length > 0 && (
-            <div style={{ marginTop: zoneOptions.length > 0 ? 14 : 10 }}>
-              <label
-                htmlFor="business-category"
-                style={{
-                  display: "block",
-                  fontSize: 12,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  marginBottom: 6,
-                  color: "rgba(191, 219, 254, 0.88)",
-                }}
-              >
-                Business Category
-              </label>
-              <select
-                id="business-category"
-                value={selectedCategory}
-                onChange={(event) => setSelectedCategory(event.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "7px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(148,163,184,0.45)",
-                  background: "rgba(30, 41, 59, 0.9)",
-                  color: "#f9fafb",
-                  fontSize: 13,
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
-                }}
-              >
-                <option value="all">All categories</option>
-                {businessCategories.map((category) => (
-                  <option key={category} value={category}>
-                    {humanizeCategory(category)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+            Business Category
+          </label>
+          <select
+            id="business-category"
+            value={selectedCategory}
+            onChange={(event) => setSelectedCategory(event.target.value)}
+            style={{
+              width: "100%",
+              padding: "6px 10px",
+              borderRadius: "4px",
+              border: "1px solid rgba(255,255,255,0.3)",
+              background: "rgba(31, 41, 55, 0.95)",
+              color: "#f9fafb",
+              fontSize: "13px",
+            }}
+          >
+            <option value="all">All categories</option>
+            {businessCategories.map((category) => (
+              <option key={category} value={category}>
+                {humanizeCategory(category)}
+              </option>
+            ))}
+          </select>
         </div>
       )}
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
