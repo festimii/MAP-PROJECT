@@ -2,6 +2,7 @@
   "name": "vivabackend",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -12,6 +13,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "mssql": "^11.0.1"
+    "mssql": "^11.0.1",
+    "node-fetch": "^3.3.2"
   }
 }

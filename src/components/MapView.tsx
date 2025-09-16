@@ -689,10 +689,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     applySelectionToMap();
 
     const map = mapRef.current;
-    const nextCategory = refreshBusinessCategoryState(
-      selection,
-      focusedStore
-    );
+    const nextCategory = refreshBusinessCategoryState(selection, focusedStore);
 
     if (!map) {
       return;
@@ -820,7 +817,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             id: "city-hover",
             type: "fill",
             source: "kosovo-cities",
-            paint: { "fill-color": "#3b82f6", "fill-opacity": 0.6 },
+            paint: { "fill-color": "#3b82f6", "fill-opacity": 0 },
             filter: ["==", ["get", nameKey], ""],
           },
           "city-boundaries"
@@ -1093,7 +1090,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
         map.on("click", (event) => {
           const nearbyStoreFeatures = map.queryRenderedFeatures(event.point, {
-            layers: ["store-points", "store-points-highlight", "business-points"],
+            layers: [
+              "store-points",
+              "store-points-highlight",
+              "business-points",
+            ],
           });
 
           if (nearbyStoreFeatures.length === 0) {

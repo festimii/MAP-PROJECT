@@ -11,10 +11,14 @@ import osmRoutes from "./routes/osm.js";
 import combinedRoutes from "./routes/combined.js";
 
 const app = express();
+const PORT = 4000;
+const host = "0.0.0.0";
+
+// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// Mount routes
+// Routes
 app.use("/api/cities", citiesRoutes);
 app.use("/api/areas", areasRoutes);
 app.use("/api/regions", regionsRoutes);
@@ -23,6 +27,7 @@ app.use("/api/zones", zonesRoutes);
 app.use("/api/osm", osmRoutes);
 app.use("/api/combined", combinedRoutes);
 
-const PORT = 4000;
-const host = "0.0.0.0";
-app.listen(PORT, () => console.log(`🚀 API running at http://${host}:${PORT}`));
+// Start server
+app.listen(PORT, host, () => {
+  console.log(`🚀 API running at http://${host}:${PORT}`);
+});

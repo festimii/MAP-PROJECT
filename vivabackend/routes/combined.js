@@ -3,69 +3,11 @@ import { getPool } from "../db.js";
 
 const router = Router();
 
-function buildOverpassQuery(lat, lon, radius) {
-  return `
-    [out:json];
-    (
-      node["amenity"](around:${radius},${lat},${lon});
-      node["shop"](around:${radius},${lat},${lon});
-    );
-    out body;
-  `;
-}
-
-async function fetchOSMBusinesses(lat, lon, radius = 500) {
-  const query = buildOverpassQuery(lat, lon, radius);
-  const response = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: query,
-  });
-
-  const text = await response.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    console.error("❌ OSM returned non-JSON:", text.slice(0, 200));
-    return [];
-  }
-
-  return data.elements
-    .filter((el) => el.type === "node" && el.tags)
-    .map((el) => ({
-      OSM_Id: el.id,
-      Name: el.tags.name || "Unknown",
-      Category: el.tags.amenity || el.tags.shop || "other",
-      Latitude: el.lat,
-      Longitude: el.lon,
-      Address: el.tags["addr:street"] || null,
-    }));
-}
-
-async function saveBusinessesToDB(pool, departmentCode, businesses) {
-  for (const b of businesses) {
-    await pool
-      .request()
-      .input("Store_Department_Code", departmentCode)
-      .input("OSM_Id", b.OSM_Id)
-      .input("Name", b.Name)
-      .input("Category", b.Category)
-      .input("Latitude", b.Latitude)
-      .input("Longitude", b.Longitude)
-      .input("Address", b.Address).query(`
-        INSERT INTO StoreNearbyBusiness
-        (Store_Department_Code, OSM_Id, Name, Category, Latitude, Longitude, Address, RetrievedAt)
-        VALUES (@Store_Department_Code, @OSM_Id, @Name, @Category, @Latitude, @Longitude, @Address, GETDATE())
-      `);
-  }
-}
-
 router.get("/stores-with-businesses", async (_req, res) => {
   try {
     const pool = await getPool();
 
-    // ✅ Removed Zone_Code/Zone_Name
+    // Fetch all stores
     const result = await pool.request().query(`
       SELECT DISTINCT
         o.Region_Code,
@@ -90,44 +32,70 @@ router.get("/stores-with-businesses", async (_req, res) => {
     const enriched = [];
 
     for (const row of result.recordset) {
-      let businesses = [];
+      // ✅ Get businesses only from DB
+      const businesses = await pool
+        .request()
+        .input("Store_Department_Code", row.Department_Code).query(`
+     SELECT 
+    OSM_Id, 
+    Name, 
+    Category, 
+    Latitude, 
+    Longitude, 
+    Address, 
+    RetrievedAt
+FROM dbo.StoreNearbyBusiness
+WHERE Store_Department_Code = @Store_Department_Code
+  AND Category IN (
+      -- Core Walmart-style retail formats
+      'supermarket',
+      'department_store',
+      'variety_store',
+      'mall',
+      'marketplace',
+      'general',
 
-      if (row.Latitude && row.Longitude) {
-        // 1. Check cached businesses
-        const cached = await pool
-          .request()
-          .input("Store_Department_Code", row.Department_Code).query(`
-            SELECT OSM_Id, Name, Category, Latitude, Longitude, Address, RetrievedAt
-            FROM StoreNearbyBusiness
-            WHERE Store_Department_Code = @Store_Department_Code
-          `);
+      -- In-store departments
+      'clothes',
+      'shoes',
+      'fashion_accessories',
+      'electronics',
+      'computer',
+      'mobile_phone',
+      'furniture',
+      'houseware',
+      'kitchen',
+      'toys',
+      'books',
+      'music',
+      'video_games',
+      'bakery',
+      'confectionery',
+      'pharmacy',
+      'cosmetics',
+      'beauty',
+      'health_food',
 
-        if (cached.recordset.length > 0) {
-          businesses = cached.recordset;
-        } else {
-          // 2. Fetch fresh businesses
-          businesses = await fetchOSMBusinesses(
-            row.Latitude,
-            row.Longitude,
-            500
-          );
+      -- Extended retail categories
+      'gift',
+      'hardware',
+      'greengrocer',
+      'pet',
+      'stationery',
+      'sports'
+  )
+ORDER BY Category, Name;
+        `);
 
-          // 3. Save to DB
-          if (businesses.length > 0) {
-            await saveBusinessesToDB(pool, row.Department_Code, businesses);
-          }
-
-          // Throttle requests to OSM → avoid hammering
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-      }
-
-      enriched.push({ ...row, NearbyBusinesses: businesses });
+      enriched.push({
+        ...row,
+        NearbyBusinesses: businesses.recordset || [],
+      });
     }
 
     res.json(enriched);
   } catch (err) {
-    console.error("❌ Error combining SQL + OSM:", err);
+    console.error("❌ Error reading SQL:", err);
     res.status(500).send("Server error");
   }
 });
