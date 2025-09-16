@@ -202,6 +202,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [storesData, setStoresData] = useState<StoreData[]>(stores ?? []);
   const initialStoresRef = useRef<StoreData[] | undefined>(stores);
   const previousSelectionHadValue = useRef(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const initialViewportRef = useRef({
+    center: [21, 42.6] as [number, number],
+    zoom: 7.5,
+    pitch: 0,
+    bearing: 0,
+  });
 
   const filterBusinessFeaturesBySelection = useCallback(
     (
@@ -646,6 +653,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   useEffect(() => {
     if (!mapContainer.current) return;
 
+    setMapLoaded(false);
     businessFeaturesRef.current = [];
     setBusinessCategories([]);
     categorySelectionWasUserDriven.current = false;
@@ -656,13 +664,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
       : "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
 
+    const { center, zoom, pitch, bearing } = initialViewportRef.current;
+
     const map: MapLibreMap = new maplibregl.Map({
       container: mapContainer.current,
       style: styleUrl,
-      center: [21, 42.6],
-      zoom: 7.5,
-      pitch: 0,
-      bearing: 0,
+      center,
+      zoom,
+      pitch,
+      bearing,
     });
 
     mapRef.current = map;
@@ -1210,8 +1220,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         });
       } catch (err) {
         console.error("Map load error:", err);
+      } finally {
+        applySelectionToMap();
+        if (isMounted) {
+          setMapLoaded(true);
+        }
       }
-      applySelectionToMap();
     });
 
     return () => {
@@ -1368,26 +1382,151 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     };
   }, [selection, storesData]);
 
+  const handleResetView = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const { center, zoom, pitch, bearing } = initialViewportRef.current;
+    map.flyTo({
+      center,
+      zoom,
+      pitch,
+      bearing,
+      speed: 0.6,
+      curve: 1.3,
+      easing: (t) => t,
+      essential: true,
+    });
+  }, []);
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      {/* Toggle button */}
-      <button
-        onClick={() => setDarkMode(!darkMode)}
+      <div
         style={{
           position: "absolute",
-          top: 10,
-          left: 10,
-          zIndex: 1,
-          padding: "6px 12px",
-          background: "#111",
-          color: "#fff",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
+          top: 12,
+          left: 12,
+          zIndex: 3,
+          width: 220,
+          padding: "14px 16px",
+          background: "rgba(17, 24, 39, 0.82)",
+          color: "#f8fafc",
+          borderRadius: 12,
+          boxShadow: "0 16px 32px rgba(15,23,42,0.38)",
+          border: "1px solid rgba(148, 163, 184, 0.35)",
+          backdropFilter: "blur(8px)",
         }}
       >
-        {darkMode ? "Light Mode" : "Dark Mode"}
-      </button>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 11,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "rgba(148, 163, 184, 0.75)",
+          }}
+        >
+          View options
+        </p>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            marginTop: 10,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setDarkMode((value) => !value)}
+            title={darkMode ? "Switch to light basemap" : "Switch to dark basemap"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "7px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(148,163,184,0.35)",
+              background: "rgba(30, 41, 59, 0.92)",
+              color: "#e2e8f0",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              boxShadow: "0 8px 20px rgba(15,23,42,0.35)",
+            }}
+          >
+            <span aria-hidden="true" style={{ fontSize: 14 }}>
+              {darkMode ? "☀️" : "🌙"}
+            </span>
+            <span>{darkMode ? "Light basemap" : "Dark basemap"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleResetView}
+            title="Reset map view"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "7px 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(148,163,184,0.35)",
+              background: "rgba(30, 41, 59, 0.92)",
+              color: "#e2e8f0",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              boxShadow: "0 8px 20px rgba(15,23,42,0.35)",
+            }}
+          >
+            <span aria-hidden="true" style={{ fontSize: 14 }}>
+              🧭
+            </span>
+            <span>Reset view</span>
+          </button>
+        </div>
+        <p
+          style={{
+            margin: "10px 0 0",
+            fontSize: 11,
+            color: "rgba(148, 163, 184, 0.78)",
+            lineHeight: 1.45,
+          }}
+        >
+          {selection
+            ? "Use the competition filter to compare nearby activity."
+            : "Choose a city, area or zone on the left to unlock insights."}
+        </p>
+      </div>
+      {!mapLoaded && (
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 2,
+            padding: "12px 18px",
+            background: "rgba(15, 23, 42, 0.88)",
+            borderRadius: 12,
+            border: "1px solid rgba(148, 163, 184, 0.35)",
+            boxShadow: "0 20px 40px rgba(15,23,42,0.45)",
+            color: "#e2e8f0",
+            pointerEvents: "none",
+            textAlign: "center",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+            Loading basemap…
+          </p>
+          <p style={{ margin: "4px 0 0", fontSize: 11, color: "rgba(148,163,184,0.8)" }}>
+            Preparing Viva Fresh layers
+          </p>
+        </div>
+      )}
       {selectionSummary && (
         <div
           style={{
@@ -1519,146 +1658,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 </div>
               )}
           </div>
-          <div
-            style={{
-              padding: "0 20px 12px",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: 14,
-            }}
-          >
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Stores
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#f1f5f9",
-                }}
-              >
-                {selectionSummary.storeCount}
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Total SQM
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#f1f5f9",
-                }}
-              >
-                {selectionSummary.totalSQM.toLocaleString()} m²
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Geo coverage
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: "#f1f5f9",
-                }}
-              >
-                {selectionSummary.storeCount > 0
-                  ? `${Math.round(
-                      (selectionSummary.geocodedCount /
-                        selectionSummary.storeCount) *
-                        100
-                    )}%`
-                  : "0%"}
-              </p>
-              <p
-                style={{
-                  margin: "2px 0 0",
-                  fontSize: 11,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                {selectionSummary.storeCount > 0
-                  ? `${selectionSummary.geocodedCount}/${selectionSummary.storeCount} mapped`
-                  : "0/0 mapped"}
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Top formats
-              </p>
-              {selectionSummary.topFormats.length === 0 ? (
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    fontSize: 12,
-                    color: "rgba(148, 163, 184, 0.7)",
-                  }}
-                >
-                  Mix coming soon
-                </p>
-              ) : (
-                <ul
-                  style={{
-                    margin: "6px 0 0",
-                    padding: 0,
-                    listStyle: "none",
-                    display: "grid",
-                    gap: 6,
-                  }}
-                >
-                  {selectionSummary.topFormats.map(({ format, count }) => (
-                    <li
-                      key={format}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 12,
-                        color: "rgba(226, 232, 240, 0.85)",
-                        background: "rgba(59, 130, 246, 0.12)",
-                        border: "1px solid rgba(59, 130, 246, 0.18)",
-                        borderRadius: 8,
-                        padding: "6px 8px",
-                      }}
-                    >
-                      <span style={{ fontWeight: 500 }}>{format}</span>
-                      <span>{count}×</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {selectionCompetition && (
+          <div style={{ flex: "1 1 auto", overflowY: "auto" }}>
+            <div
+              style={{
+                padding: "0 20px 12px",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                gap: 14,
+              }}
+            >
               <div>
                 <p
                   style={{
@@ -1667,66 +1675,199 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     color: "rgba(148, 163, 184, 0.75)",
                   }}
                 >
-                  Competition snapshot
+                  Stores
                 </p>
                 <p
                   style={{
                     margin: "2px 0 0",
-                    fontSize: 14,
+                    fontSize: 16,
                     fontWeight: 600,
                     color: "#f1f5f9",
                   }}
                 >
-                  {selectionCompetition.total > 0
-                    ? `${selectionCompetition.total.toLocaleString()} nearby location${
-                        selectionCompetition.total === 1 ? "" : "s"
-                      }`
-                    : "No competition data yet"}
+                  {selectionSummary.storeCount}
                 </p>
-                {selectionCompetition.topCategories.length > 0 && (
-                  <div
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: "rgba(148, 163, 184, 0.75)",
+                  }}
+                >
+                  Total SQM
+                </p>
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: "#f1f5f9",
+                  }}
+                >
+                  {selectionSummary.totalSQM.toLocaleString()} m²
+                </p>
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: "rgba(148, 163, 184, 0.75)",
+                  }}
+                >
+                  Geo coverage
+                </p>
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: "#f1f5f9",
+                  }}
+                >
+                  {selectionSummary.storeCount > 0
+                    ? `${Math.round(
+                        (selectionSummary.geocodedCount /
+                          selectionSummary.storeCount) *
+                          100
+                      )}%`
+                    : "0%"}
+                </p>
+                <p
+                  style={{
+                    margin: "2px 0 0",
+                    fontSize: 11,
+                    color: "rgba(148, 163, 184, 0.75)",
+                  }}
+                >
+                  {selectionSummary.storeCount > 0
+                    ? `${selectionSummary.geocodedCount}/${selectionSummary.storeCount} mapped`
+                    : "0/0 mapped"}
+                </p>
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: "rgba(148, 163, 184, 0.75)",
+                  }}
+                >
+                  Top formats
+                </p>
+                {selectionSummary.topFormats.length === 0 ? (
+                  <p
                     style={{
-                      marginTop: 6,
-                      display: "flex",
-                      flexWrap: "wrap",
+                      margin: "6px 0 0",
+                      fontSize: 12,
+                      color: "rgba(148, 163, 184, 0.7)",
+                    }}
+                  >
+                    Mix coming soon
+                  </p>
+                ) : (
+                  <ul
+                    style={{
+                      margin: "6px 0 0",
+                      padding: 0,
+                      listStyle: "none",
+                      display: "grid",
                       gap: 6,
                     }}
                   >
-                    {selectionCompetition.topCategories.map(
-                      ({ category, label, count }) => (
-                        <span
-                          key={category}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            fontSize: 11,
-                            background: "rgba(16, 185, 129, 0.16)",
-                            color: "rgba(167, 243, 208, 0.95)",
-                            border: "1px solid rgba(16, 185, 129, 0.22)",
-                            borderRadius: 9999,
-                            padding: "4px 10px",
-                          }}
-                        >
-                          {label}
-                          <span
-                            style={{
-                              fontWeight: 600,
-                              color: "rgba(16, 185, 129, 0.95)",
-                              background: "rgba(16, 185, 129, 0.12)",
-                              padding: "1px 6px",
-                              borderRadius: 9999,
-                            }}
-                          >
-                            {count}
-                          </span>
-                        </span>
-                      )
-                    )}
-                  </div>
+                    {selectionSummary.topFormats.map(({ format, count }) => (
+                      <li
+                        key={format}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: 12,
+                          color: "rgba(226, 232, 240, 0.85)",
+                          background: "rgba(59, 130, 246, 0.12)",
+                          border: "1px solid rgba(59, 130, 246, 0.18)",
+                          borderRadius: 8,
+                          padding: "6px 8px",
+                        }}
+                      >
+                        <span style={{ fontWeight: 500 }}>{format}</span>
+                        <span>{count}×</span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
-            )}
+              {selectionCompetition && (
+                <div>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 12,
+                      color: "rgba(148, 163, 184, 0.75)",
+                    }}
+                  >
+                    Competition snapshot
+                  </p>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "#f1f5f9",
+                    }}
+                  >
+                    {selectionCompetition.total > 0
+                      ? `${selectionCompetition.total.toLocaleString()} nearby location${
+                          selectionCompetition.total === 1 ? "" : "s"
+                        }`
+                      : "No competition data yet"}
+                  </p>
+                  {selectionCompetition.topCategories.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 6,
+                      }}
+                    >
+                      {selectionCompetition.topCategories.map(
+                        ({ category, label, count }) => (
+                          <span
+                            key={category}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              background: "rgba(16, 185, 129, 0.16)",
+                              color: "rgba(167, 243, 208, 0.95)",
+                              border: "1px solid rgba(16, 185, 129, 0.22)",
+                              borderRadius: 9999,
+                              padding: "4px 10px",
+                            }}
+                          >
+                            {label}
+                            <span
+                              style={{
+                                fontWeight: 600,
+                                color: "rgba(16, 185, 129, 0.95)",
+                                background: "rgba(16, 185, 129, 0.12)",
+                                padding: "1px 6px",
+                                borderRadius: 9999,
+                              }}
+                            >
+                              {count}
+                            </span>
+                          </span>
+                        )
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
           <div
             style={{
@@ -1813,7 +1954,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         <div
           style={{
             position: "absolute",
-            top: 68,
+            top: 140,
             left: 10,
             zIndex: 2,
             width: 250,
@@ -1900,6 +2041,96 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               No mapped businesses for this filter yet.
             </p>
           )}
+        </div>
+      )}
+      {!selectionSummary && (
+        <div
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            width: 300,
+            maxWidth: "calc(100% - 40px)",
+            background: "rgba(17, 24, 39, 0.82)",
+            color: "#e2e8f0",
+            padding: "18px 20px",
+            borderRadius: 14,
+            boxShadow: "0 18px 45px rgba(15,23,42,0.45)",
+            border: "1px solid rgba(148, 163, 184, 0.32)",
+            backdropFilter: "blur(6px)",
+            zIndex: 2,
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "rgba(148, 163, 184, 0.75)",
+            }}
+          >
+            Explore the network
+          </p>
+          <h3
+            style={{
+              margin: "8px 0 12px",
+              fontSize: 18,
+              fontWeight: 600,
+              color: "#f8fafc",
+            }}
+          >
+            Select a focus area to see store mix & competition
+          </h3>
+          <div
+            style={{
+              display: "grid",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>
+                📊
+              </span>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  color: "rgba(226, 232, 240, 0.82)",
+                  lineHeight: 1.5,
+                }}
+              >
+                Use the sidebar filters to switch between city, area and zone perspectives.
+              </p>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>
+                🗺️
+              </span>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  color: "rgba(226, 232, 240, 0.82)",
+                  lineHeight: 1.5,
+                }}
+              >
+                Click directly on a city boundary to open its dynamic report and animate the map focus.
+              </p>
+            </div>
+          </div>
         </div>
       )}
       <div
