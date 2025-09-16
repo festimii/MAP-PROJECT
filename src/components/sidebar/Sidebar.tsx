@@ -128,14 +128,31 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <Toolbar sx={toolbarOffsetSx} />
-      <Box sx={{ px: 2, py: 1 }}>
-        <Button variant="outlined" size="small" onClick={onBack} sx={{ mb: 2 }}>
+      <Box
+        sx={{
+          px: 2.5,
+          py: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.5,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          backgroundColor: "rgba(15, 23, 42, 0.55)",
+          boxShadow: "0 18px 36px rgba(8, 15, 30, 0.35)",
+        }}
+      >
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={onBack}
+          sx={{ width: "fit-content" }}
+        >
           ← Back to Areas
         </Button>
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           {area.name}
         </Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+        <Stack direction="row" spacing={1} flexWrap="wrap">
           <Chip
             size="small"
             color="primary"
@@ -147,16 +164,26 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
           <Chip size="small" variant="outlined" label={geoChipLabel} />
           <Chip size="small" variant="outlined" label={zoneChipLabel} />
         </Stack>
-        <Typography variant="body2" sx={{ color: "text.secondary", mt: 1 }}>
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
           {area.cities.length > 0
             ? `Cities: ${area.cities.join(", ")}`
             : "No linked cities yet"}
         </Typography>
       </Box>
 
-      <Divider />
-      <Box sx={{ flex: 1, overflowY: "auto", px: 2, py: 1 }}>
-        <Typography variant="subtitle2" gutterBottom>
+      <Divider sx={{ borderColor: "divider" }} />
+      <Box
+        sx={{
+          flex: 1,
+          overflowY: "auto",
+          px: 2.5,
+          py: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.5,
+        }}
+      >
+        <Typography variant="subtitle2" sx={{ color: "text.secondary" }}>
           Viva Fresh locations
         </Typography>
 
@@ -165,10 +192,12 @@ const AreaDetail = ({ area, onBack }: { area: SidebarAreaItem; onBack: () => voi
             key={department.Department_Code}
             variant="outlined"
             sx={{
-              mb: 1.5,
-              borderRadius: 2,
-              bgcolor: "background.default",
-              "&:hover": { boxShadow: 3, borderColor: "primary.main" },
+              borderRadius: 3,
+              transition: "all 0.2s ease",
+              "&:hover": {
+                boxShadow: "0 18px 32px rgba(8, 15, 30, 0.4)",
+                borderColor: "rgba(59, 130, 246, 0.4)",
+              },
             }}
           >
             <CardActionArea
@@ -235,14 +264,31 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
   return (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <Toolbar sx={toolbarOffsetSx} />
-      <Box sx={{ px: 2, py: 1 }}>
-        <Button variant="outlined" size="small" onClick={onBack} sx={{ mb: 2 }}>
+      <Box
+        sx={{
+          px: 2.5,
+          py: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.5,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          backgroundColor: "rgba(15, 23, 42, 0.55)",
+          boxShadow: "0 18px 36px rgba(8, 15, 30, 0.35)",
+        }}
+      >
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={onBack}
+          sx={{ width: "fit-content" }}
+        >
           ← Back to Zones
         </Button>
         <Typography variant="h6" sx={{ fontWeight: 600 }}>
           {zone.name}
         </Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+        <Stack direction="row" spacing={1} flexWrap="wrap">
           <Chip
             size="small"
             color="primary"
@@ -258,7 +304,7 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
           />
           <Chip size="small" variant="outlined" label={regionChipLabel} />
         </Stack>
-        <Typography variant="body2" sx={{ color: "text.secondary", mt: 1 }}>
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
           Areas covered
         </Typography>
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.5 }}>
@@ -266,7 +312,7 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
             <Chip key={areaName} label={areaName} size="small" />
           ))}
         </Box>
-        <Typography variant="body2" sx={{ color: "text.secondary", mt: 1 }}>
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
           Cities linked
         </Typography>
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.5 }}>
@@ -276,9 +322,19 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
         </Box>
       </Box>
 
-      <Divider />
-      <Box sx={{ flex: 1, overflowY: "auto", px: 2, py: 1 }}>
-        <Typography variant="subtitle2" gutterBottom>
+      <Divider sx={{ borderColor: "divider" }} />
+      <Box
+        sx={{
+          flex: 1,
+          overflowY: "auto",
+          px: 2.5,
+          py: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.5,
+        }}
+      >
+        <Typography variant="subtitle2" sx={{ color: "text.secondary" }}>
           Stores in this zone
         </Typography>
         {zone.departments.map((department) => (
@@ -286,10 +342,12 @@ const ZoneDetail = ({ zone, onBack }: { zone: SidebarZoneItem; onBack: () => voi
             key={`${department.Department_Code}-${department.Area_Code}`}
             variant="outlined"
             sx={{
-              mb: 1.5,
-              borderRadius: 2,
-              bgcolor: "background.default",
-              "&:hover": { boxShadow: 3, borderColor: "primary.main" },
+              borderRadius: 3,
+              transition: "all 0.2s ease",
+              "&:hover": {
+                boxShadow: "0 18px 32px rgba(8, 15, 30, 0.4)",
+                borderColor: "rgba(59, 130, 246, 0.4)",
+              },
             }}
           >
             <CardContent>
@@ -355,11 +413,22 @@ const ListView = ({
         height: "100%",
         display: "flex",
         flexDirection: "column",
-        bgcolor: "background.paper",
       }}
     >
       <Toolbar sx={toolbarOffsetSx} />
-      <Box sx={{ px: 2, py: 1 }}>
+      <Box
+        sx={{
+          px: 2.5,
+          py: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: 1,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          backgroundColor: "rgba(15, 23, 42, 0.55)",
+          boxShadow: "0 18px 36px rgba(8, 15, 30, 0.35)",
+        }}
+      >
         <ToggleButtonGroup
           value={filterMode}
           exclusive
@@ -375,14 +444,14 @@ const ListView = ({
         {!loading && (
           <Typography
             variant="caption"
-            sx={{ color: "text.secondary", display: "block", mt: 0.75 }}
+            sx={{ color: "text.secondary", display: "block" }}
           >
             {listSummaryLabel}
           </Typography>
         )}
       </Box>
 
-      <Box sx={{ px: 1, py: 1, flex: 1, overflowY: "auto" }}>
+      <Box sx={{ px: 2.5, py: 2, flex: 1, overflowY: "auto" }}>
         {loading ? (
           <Box
             sx={{
@@ -449,18 +518,9 @@ const ListView = ({
                   key={item.code}
                   selected={isSelected}
                   onClick={() => onSelectItem(item)}
-                  sx={{
-                    borderRadius: 2,
-                    mb: 0.5,
-                    alignItems: "flex-start",
-                    "&.Mui-selected": {
-                      bgcolor: "primary.main",
-                      color: "black",
-                      "& .MuiListItemIcon-root": { color: "black" },
-                    },
-                  }}
+                  sx={{ alignItems: "flex-start" }}
                 >
-                  <ListItemIcon sx={{ color: "text.secondary", mt: 0.5 }}>
+                  <ListItemIcon sx={{ mt: 0.5, minWidth: 32 }}>
                     {icon}
                   </ListItemIcon>
                   <ListItemText
@@ -468,7 +528,7 @@ const ListView = ({
                     secondaryTypographyProps={{
                       sx: {
                         color: isSelected
-                          ? "rgba(15,23,42,0.75)"
+                          ? "rgba(15,23,42,0.72)"
                           : "text.secondary",
                       },
                     }}
@@ -482,8 +542,8 @@ const ListView = ({
         )}
       </Box>
 
-      <Divider sx={{ my: 1, borderColor: "divider" }} />
-      <Box sx={{ px: 2, pb: 2 }}>
+      <Divider sx={{ mx: 2.5, borderColor: "divider" }} />
+      <Box sx={{ px: 2.5, pb: 2 }}>
         <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
           © 2025 Viva Fresh
         </Typography>
