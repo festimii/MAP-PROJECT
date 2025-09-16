@@ -12,19 +12,15 @@ import {
   Chip,
   Divider,
   FormControl,
-  IconButton,
   InputLabel,
   MenuItem,
   Paper,
   Select,
   Stack,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material/Select";
 import {
-  DarkMode,
-  LightMode,
   LocationCity,
   MapOutlined,
   TravelExplore,
@@ -85,6 +81,11 @@ type BusinessProperties = {
   cityName?: string;
 };
 
+type StoreFocus = {
+  department: string;
+  coordinates: [number, number];
+};
+
 const normalizeName = (value: string) => value.toLowerCase().trim();
 
 type MapViewProps = {
@@ -111,53 +112,85 @@ const createEmptyStoreHighlightFilter = (): FilterSpecification =>
   [
     "all",
     ["!has", "point_count"],
-    ["==", "cityNormalized", "__none__"],
+    ["==", "department", "__none__"],
   ] as unknown as FilterSpecification;
 
 const getStoreSelectionFilterContext = (
-  selectionValue: MapSelection | null
+  selectionValue: MapSelection | null,
+  storeFocus: StoreFocus | null
 ): {
   highlightFilter: FilterSpecification;
+  displayFilter: FilterSpecification;
+  highlightEnabled: boolean;
   cityNames: string[];
 } => {
   if (!selectionValue) {
+    if (storeFocus) {
+      return {
+        highlightFilter: [
+          "all",
+          ["!has", "point_count"],
+          ["==", "department", storeFocus.department],
+        ] as unknown as FilterSpecification,
+        displayFilter: createStoreBaseFilter(),
+        highlightEnabled: true,
+        cityNames: [],
+      };
+    }
+
     return {
       highlightFilter: createEmptyStoreHighlightFilter(),
+      displayFilter: createStoreBaseFilter(),
+      highlightEnabled: false,
       cityNames: [],
     };
   }
 
   switch (selectionValue.mode) {
-    case "city":
+    case "city": {
+      const filter = [
+        "all",
+        ["!has", "point_count"],
+        ["==", "cityNormalized", normalizeName(selectionValue.city)],
+      ] as unknown as FilterSpecification;
       return {
-        highlightFilter: [
-          "all",
-          ["!has", "point_count"],
-          ["==", "cityNormalized", normalizeName(selectionValue.city)],
-        ] as unknown as FilterSpecification,
+        highlightFilter: filter,
+        displayFilter: filter,
+        highlightEnabled: true,
         cityNames: [selectionValue.city],
       };
-    case "area":
+    }
+    case "area": {
+      const filter = [
+        "all",
+        ["!has", "point_count"],
+        ["==", "areaNormalized", normalizeName(selectionValue.area)],
+      ] as unknown as FilterSpecification;
       return {
-        highlightFilter: [
-          "all",
-          ["!has", "point_count"],
-          ["==", "areaNormalized", normalizeName(selectionValue.area)],
-        ] as unknown as FilterSpecification,
+        highlightFilter: filter,
+        displayFilter: filter,
+        highlightEnabled: true,
         cityNames: selectionValue.cities,
       };
-    case "zone":
+    }
+    case "zone": {
+      const filter = [
+        "all",
+        ["!has", "point_count"],
+        ["==", "zoneNormalized", normalizeName(selectionValue.zone)],
+      ] as unknown as FilterSpecification;
       return {
-        highlightFilter: [
-          "all",
-          ["!has", "point_count"],
-          ["==", "zoneNormalized", normalizeName(selectionValue.zone)],
-        ] as unknown as FilterSpecification,
+        highlightFilter: filter,
+        displayFilter: filter,
+        highlightEnabled: true,
         cityNames: selectionValue.cities,
       };
+    }
     default:
       return {
         highlightFilter: createEmptyStoreHighlightFilter(),
+        displayFilter: createStoreBaseFilter(),
+        highlightEnabled: false,
         cityNames: [],
       };
   }
@@ -211,7 +244,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const navigate = useNavigate();
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode] = useState(false);
   const businessFeaturesRef = useRef<
     GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[]
   >([]);
@@ -221,6 +254,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   );
   const selectedCategoryRef = useRef(selectedCategory);
   const categorySelectionWasUserDriven = useRef(false);
+  const [focusedStore, setFocusedStore] = useState<StoreFocus | null>(null);
+  const storeFocusRef = useRef<StoreFocus | null>(null);
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
   const selectionRef = useRef<MapSelection | null>(null);
@@ -231,86 +266,116 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const filterBusinessFeaturesBySelection = useCallback(
     (
       features: GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[],
-      selectionValue: MapSelection | null
+      selectionValue: MapSelection | null,
+      storeFocus: StoreFocus | null
     ) => {
-      if (!selectionValue) {
-        return [];
-      }
-
       if (features.length === 0) {
         return features;
       }
 
-      switch (selectionValue.mode) {
-        case "city": {
-          const targetCity = normalizeName(selectionValue.city);
-          return features.filter((feature) => {
-            const props = feature.properties;
-            if (!props) return false;
-            const cityCandidate =
-              props.cityName && props.cityName.trim().length > 0
-                ? normalizeName(props.cityName)
-                : props.areaName
-                ? normalizeName(props.areaName.replace(/ Area$/i, ""))
+      if (selectionValue) {
+        switch (selectionValue.mode) {
+          case "city": {
+            const targetCity = normalizeName(selectionValue.city);
+            return features.filter((feature) => {
+              const props = feature.properties;
+              if (!props) return false;
+              const cityCandidate =
+                props.cityName && props.cityName.trim().length > 0
+                  ? normalizeName(props.cityName)
+                  : props.areaName
+                  ? normalizeName(props.areaName.replace(/ Area$/i, ""))
+                  : null;
+              if (cityCandidate && cityCandidate === targetCity) {
+                return true;
+              }
+              const areaCandidate = props.areaName
+                ? normalizeName(props.areaName)
                 : null;
-            if (cityCandidate && cityCandidate === targetCity) {
-              return true;
-            }
-            const areaCandidate = props.areaName
-              ? normalizeName(props.areaName)
-              : null;
-            return areaCandidate === targetCity;
-          });
-        }
-        case "area": {
-          const targetArea = normalizeName(selectionValue.area);
-          return features.filter((feature) => {
-            const areaCandidate = feature.properties?.areaName
-              ? normalizeName(feature.properties.areaName)
-              : null;
-            return areaCandidate === targetArea;
-          });
-        }
-        case "zone": {
-          const allowedAreas = new Set(
-            selectionValue.areas.map((area) => normalizeName(area))
-          );
-          const allowedCities = new Set(
-            selectionValue.cities.map((city) => normalizeName(city))
-          );
-          return features.filter((feature) => {
-            const props = feature.properties;
-            if (!props) return false;
-            const areaCandidate = props.areaName
-              ? normalizeName(props.areaName)
-              : null;
-            if (areaCandidate && allowedAreas.has(areaCandidate)) {
-              return true;
-            }
-            const cityCandidate =
-              props.cityName && props.cityName.trim().length > 0
-                ? normalizeName(props.cityName)
-                : props.areaName
-                ? normalizeName(props.areaName.replace(/ Area$/i, ""))
+              return areaCandidate === targetCity;
+            });
+          }
+          case "area": {
+            const targetArea = normalizeName(selectionValue.area);
+            return features.filter((feature) => {
+              const areaCandidate = feature.properties?.areaName
+                ? normalizeName(feature.properties.areaName)
                 : null;
-            if (cityCandidate && allowedCities.has(cityCandidate)) {
-              return true;
-            }
-            return false;
-          });
+              return areaCandidate === targetArea;
+            });
+          }
+          case "zone": {
+            const allowedAreas = new Set(
+              selectionValue.areas.map((area) => normalizeName(area))
+            );
+            const allowedCities = new Set(
+              selectionValue.cities.map((city) => normalizeName(city))
+            );
+            return features.filter((feature) => {
+              const props = feature.properties;
+              if (!props) return false;
+              const areaCandidate = props.areaName
+                ? normalizeName(props.areaName)
+                : null;
+              if (areaCandidate && allowedAreas.has(areaCandidate)) {
+                return true;
+              }
+              const cityCandidate =
+                props.cityName && props.cityName.trim().length > 0
+                  ? normalizeName(props.cityName)
+                  : props.areaName
+                  ? normalizeName(props.areaName.replace(/ Area$/i, ""))
+                  : null;
+              if (cityCandidate && allowedCities.has(cityCandidate)) {
+                return true;
+              }
+              return false;
+            });
+          }
+          default:
+            return features;
         }
-        default:
-          return features;
       }
+
+      if (storeFocus) {
+        return features.filter(
+          (feature) =>
+            feature.properties?.storeDepartment === storeFocus.department
+        );
+      }
+
+      return [];
     },
     []
   );
 
+  const updateStoreFocus = useCallback((nextFocus: StoreFocus | null) => {
+    const current = storeFocusRef.current;
+
+    if (current && nextFocus) {
+      if (
+        current.department === nextFocus.department &&
+        current.coordinates[0] === nextFocus.coordinates[0] &&
+        current.coordinates[1] === nextFocus.coordinates[1]
+      ) {
+        return;
+      }
+    }
+
+    if (!current && !nextFocus) {
+      return;
+    }
+
+    storeFocusRef.current = nextFocus;
+    setFocusedStore(nextFocus);
+  }, []);
+
   const refreshBusinessCategoryState = useCallback(
-    (selectionValue: MapSelection | null) => {
+    (selectionValue: MapSelection | null, storeFocus: StoreFocus | null) => {
       const relevantFeatures = filterBusinessFeaturesBySelection(
         businessFeaturesRef.current,
-        selectionValue
+        selectionValue,
+        storeFocus
       );
 
       const uniqueCategories = Array.from(
@@ -360,9 +425,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       }
 
       const selectionValue = selectionRef.current;
+      const storeFocus = storeFocusRef.current;
       const relevantFeatures = filterBusinessFeaturesBySelection(
         businessFeaturesRef.current,
-        selectionValue
+        selectionValue,
+        storeFocus
       );
 
       const filtered =
@@ -400,11 +467,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
 
     const selectionValue = selectionRef.current;
+    const storeFocus = storeFocusRef.current;
     const {
       highlightFilter: storeHighlightFilter,
+      displayFilter: storeDisplayFilter,
+      highlightEnabled: storeHighlightEnabled,
       cityNames: selectedCityNames,
-    } = getStoreSelectionFilterContext(selectionValue);
-    const storeBaseFilter = createStoreBaseFilter();
+    } = getStoreSelectionFilterContext(selectionValue, storeFocus);
 
     const cleanedNames = Array.from(
       new Set(
@@ -413,46 +482,38 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           .filter((name) => name.length > 0)
       )
     );
-    const hasCitySelection = cleanedNames.length > 0;
+    const hasCitySelection = cleanedNames.length > 0 && Boolean(selectionValue);
 
-    const highlightFilter: FilterSpecification = hasCitySelection
+    const cityHighlightFilter: FilterSpecification = hasCitySelection
       ? (["in", nameKey, ...cleanedNames] as unknown as FilterSpecification)
       : (["in", nameKey, ""] as unknown as FilterSpecification);
 
-    const clusterVisibility = selectionValue ? "none" : "visible";
-    const highlightVisibility = selectionValue ? "visible" : "none";
+    const storeHighlightVisibility = storeHighlightEnabled ? "visible" : "none";
+    const cityHighlightVisibility = selectionValue ? "visible" : "none";
 
     const zoomLevel = map.getZoom();
     const showAllStoreLabels = zoomLevel >= STORE_LABEL_VISIBILITY_ZOOM;
     const storeLabelFilter = showAllStoreLabels
-      ? createStoreBaseFilter()
+      ? storeDisplayFilter
       : storeHighlightFilter;
     const showCompetitionLabels =
       zoomLevel >= COMPETITION_LABEL_VISIBILITY_ZOOM;
 
     if (map.getLayer("store-points")) {
-      map.setFilter("store-points", storeBaseFilter);
+      map.setFilter("store-points", storeDisplayFilter);
       map.setPaintProperty(
         "store-points",
         "circle-opacity",
-        selectionValue ? 0.45 : 0.8
+        storeHighlightEnabled ? 0.55 : 0.8
       );
       map.setPaintProperty(
         "store-points",
         "circle-color",
-        selectionValue ? "#fb7185" : "#ef4444"
+        storeHighlightEnabled ? "#fb7185" : "#ef4444"
       );
     }
 
-    if (map.getLayer("clusters")) {
-      map.setLayoutProperty("clusters", "visibility", clusterVisibility);
-    }
-
-    if (map.getLayer("cluster-count")) {
-      map.setLayoutProperty("cluster-count", "visibility", clusterVisibility);
-    }
-
-    map.setFilter("city-highlight", highlightFilter);
+    map.setFilter("city-highlight", cityHighlightFilter);
 
     const boundaryOpacityExpression = [
       "interpolate",
@@ -495,7 +556,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       map.setLayoutProperty(
         "store-points-highlight",
         "visibility",
-        highlightVisibility
+        storeHighlightVisibility
       );
     }
 
@@ -520,7 +581,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       map.setLayoutProperty(
         "city-highlight",
         "visibility",
-        highlightVisibility
+        cityHighlightVisibility
       );
       const highlightOpacityExpression = selectionValue
         ? ([
@@ -597,7 +658,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       }
     } else if (selectionValue && !hasCitySelection) {
       previousSelectionHadValue.current = true;
-    } else if (!selectionValue && previousSelectionHadValue.current) {
+    } else if (
+      !selectionValue &&
+      !storeFocus &&
+      previousSelectionHadValue.current
+    ) {
       map.easeTo({
         center: [21, 42.6],
         zoom: 7.5,
@@ -615,11 +680,19 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   }, [selectedCategory]);
 
   useEffect(() => {
+    updateStoreFocus(null);
+  }, [selection, updateStoreFocus]);
+
+  useEffect(() => {
+    storeFocusRef.current = focusedStore;
     selectionRef.current = selection;
     applySelectionToMap();
 
     const map = mapRef.current;
-    const nextCategory = refreshBusinessCategoryState(selection);
+    const nextCategory = refreshBusinessCategoryState(
+      selection,
+      focusedStore
+    );
 
     if (!map) {
       return;
@@ -638,6 +711,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     runUpdate();
   }, [
     selection,
+    focusedStore,
     applySelectionToMap,
     refreshBusinessCategoryState,
     updateBusinessSource,
@@ -788,7 +862,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           },
         });
 
-        // --- Store points with clustering ---
+        // --- Store points ---
         let storesForSource = initialStoresRef.current ?? [];
 
         if (!storesForSource.length) {
@@ -838,45 +912,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         map.addSource("stores", {
           type: "geojson",
           data: buildStoreFeatureCollection(storesForSource),
-          cluster: true,
-          clusterRadius: 50,
-        });
-
-        // Cluster circles
-        map.addLayer({
-          id: "clusters",
-          type: "circle",
-          source: "stores",
-          filter: ["has", "point_count"],
-          paint: {
-            "circle-color": "#2563eb",
-            "circle-radius": [
-              "step",
-              ["get", "point_count"],
-              15,
-              10,
-              20,
-              50,
-              25,
-            ],
-            "circle-stroke-color": "#fff",
-            "circle-stroke-width": 1,
-          },
-        });
-
-        // Cluster count labels
-        map.addLayer({
-          id: "cluster-count",
-          type: "symbol",
-          source: "stores",
-          filter: ["has", "point_count"],
-          layout: {
-            "text-field": "{point_count_abbreviated}",
-            "text-size": 12,
-          },
-          paint: {
-            "text-color": "#fff",
-          },
+          cluster: false,
         });
 
         // Individual store points
@@ -898,11 +934,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           id: "store-points-highlight",
           type: "circle",
           source: "stores",
-          filter: [
-            "all",
-            ["!has", "point_count"],
-            ["==", "cityNormalized", "__none__"],
-          ],
+          filter: createEmptyStoreHighlightFilter(),
           paint: {
             "circle-radius": 9,
             "circle-color": "#f97316",
@@ -917,11 +949,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           id: "store-labels",
           type: "symbol",
           source: "stores",
-          filter: [
-            "all",
-            ["!has", "point_count"],
-            ["==", "cityNormalized", "__none__"],
-          ],
+          filter: createEmptyStoreHighlightFilter(),
           layout: {
             "text-field": ["get", "department"],
             "text-size": 12,
@@ -939,11 +967,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         const handleZoomChange = () => {
           const zoomLevel = map.getZoom();
           const showAllStoreLabels = zoomLevel >= STORE_LABEL_VISIBILITY_ZOOM;
-          const { highlightFilter } = getStoreSelectionFilterContext(
-            selectionRef.current
-          );
+          const { highlightFilter, displayFilter } =
+            getStoreSelectionFilterContext(
+              selectionRef.current,
+              storeFocusRef.current
+            );
           const storeLabelFilter = showAllStoreLabels
-            ? createStoreBaseFilter()
+            ? displayFilter
             : highlightFilter;
 
           if (map.getLayer("store-labels")) {
@@ -967,6 +997,27 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         };
 
         map.on("zoom", handleZoomChange);
+
+        const focusStore = (
+          props: StoreFeatureProperties,
+          lng: number,
+          lat: number
+        ) => {
+          updateStoreFocus({
+            department: props.department,
+            coordinates: [lng, lat],
+          });
+
+          const currentZoom = map.getZoom();
+          const targetZoom = Math.max(currentZoom, 13.5);
+
+          map.easeTo({
+            center: [lng, lat],
+            zoom: targetZoom,
+            duration: 900,
+            easing: (t) => 1 - Math.pow(1 - t, 3),
+          });
+        };
 
         // Popups for stores
         map.on("click", "store-points", (e) => {
@@ -994,6 +1045,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   </div>`
             )
             .addTo(map);
+
+          focusStore(props, e.lngLat.lng, e.lngLat.lat);
         });
 
         map.on("click", "store-points-highlight", (e) => {
@@ -1021,6 +1074,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   </div>`
             )
             .addTo(map);
+
+          focusStore(props, e.lngLat.lng, e.lngLat.lat);
         });
 
         map.on("mouseenter", "store-points", () => {
@@ -1036,32 +1091,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           map.getCanvas().style.cursor = "";
         });
 
-        map.on("click", "clusters", (event) => {
-          if (!event.features?.length) return;
-          const feature = event.features[0];
-          const clusterId = feature.properties?.cluster_id;
-          const source = map.getSource("stores") as maplibregl.GeoJSONSource & {
-            getClusterExpansionZoom: (
-              clusterIdValue: number,
-              callback: (error: Error | null, zoom: number) => void
-            ) => void;
-          };
-
-          if (!source || typeof clusterId !== "number") return;
-
-          source.getClusterExpansionZoom(clusterId, (error, zoom) => {
-            if (error) return;
-            if (feature.geometry.type !== "Point") return;
-            const [lng, lat] = feature.geometry.coordinates as [number, number];
-            map.easeTo({ center: [lng, lat], zoom, duration: 600 });
+        map.on("click", (event) => {
+          const nearbyStoreFeatures = map.queryRenderedFeatures(event.point, {
+            layers: ["store-points", "store-points-highlight", "business-points"],
           });
-        });
 
-        map.on("mouseenter", "clusters", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-        map.on("mouseleave", "clusters", () => {
-          map.getCanvas().style.cursor = "";
+          if (nearbyStoreFeatures.length === 0) {
+            updateStoreFocus(null);
+          }
         });
 
         map.addSource("businesses", {
@@ -1183,7 +1220,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
             if (isMounted) {
               const categoryToUse = refreshBusinessCategoryState(
-                selectionRef.current
+                selectionRef.current,
+                storeFocusRef.current
               );
               updateBusinessSource(
                 map,
@@ -1264,7 +1302,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
     const relevantBusinesses = filterBusinessFeaturesBySelection(
       businessFeaturesRef.current,
-      selection
+      selection,
+      focusedStore
     );
 
     const counts = new Map<string, number>();
@@ -1286,17 +1325,18 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       total: relevantBusinesses.length,
       topCategories,
     };
-  }, [selection, filterBusinessFeaturesBySelection]);
+  }, [selection, focusedStore, filterBusinessFeaturesBySelection]);
 
   const visibleCompetitionCount = useMemo(() => {
-    if (!selection) {
-      return 0;
-    }
-
     const relevantBusinesses = filterBusinessFeaturesBySelection(
       businessFeaturesRef.current,
-      selection
+      selection,
+      focusedStore
     );
+
+    if (!selection && !focusedStore) {
+      return 0;
+    }
 
     if (selectedCategory === DEFAULT_COMPETITION_CATEGORY) {
       return relevantBusinesses.length;
@@ -1305,7 +1345,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     return relevantBusinesses.filter(
       (feature) => feature.properties?.category === selectedCategory
     ).length;
-  }, [selection, selectedCategory, filterBusinessFeaturesBySelection]);
+  }, [
+    selection,
+    focusedStore,
+    selectedCategory,
+    filterBusinessFeaturesBySelection,
+  ]);
 
   const selectionSummary = useMemo(() => {
     if (!selection) {
