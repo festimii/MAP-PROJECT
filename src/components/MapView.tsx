@@ -92,6 +92,69 @@ const humanizeCategory = (value: string) =>
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ") || "Other";
 
+const DEFAULT_COMPETITION_CATEGORY = "all";
+const STORE_LABEL_VISIBILITY_ZOOM = 13;
+const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
+
+const createStoreBaseFilter = (): FilterSpecification =>
+  ["!has", "point_count"] as unknown as FilterSpecification;
+
+const createEmptyStoreHighlightFilter = (): FilterSpecification =>
+  [
+    "all",
+    ["!has", "point_count"],
+    ["==", "cityNormalized", "__none__"],
+  ] as unknown as FilterSpecification;
+
+const getStoreSelectionFilterContext = (
+  selectionValue: MapSelection | null
+): {
+  highlightFilter: FilterSpecification;
+  cityNames: string[];
+} => {
+  if (!selectionValue) {
+    return {
+      highlightFilter: createEmptyStoreHighlightFilter(),
+      cityNames: [],
+    };
+  }
+
+  switch (selectionValue.mode) {
+    case "city":
+      return {
+        highlightFilter: [
+          "all",
+          ["!has", "point_count"],
+          ["==", "cityNormalized", normalizeName(selectionValue.city)],
+        ] as unknown as FilterSpecification,
+        cityNames: [selectionValue.city],
+      };
+    case "area":
+      return {
+        highlightFilter: [
+          "all",
+          ["!has", "point_count"],
+          ["==", "areaNormalized", normalizeName(selectionValue.area)],
+        ] as unknown as FilterSpecification,
+        cityNames: selectionValue.cities,
+      };
+    case "zone":
+      return {
+        highlightFilter: [
+          "all",
+          ["!has", "point_count"],
+          ["==", "zoneNormalized", normalizeName(selectionValue.zone)],
+        ] as unknown as FilterSpecification,
+        cityNames: selectionValue.cities,
+      };
+    default:
+      return {
+        highlightFilter: createEmptyStoreHighlightFilter(),
+        cityNames: [],
+      };
+  }
+};
+
 const buildStoreFeatureCollection = (
   stores: StoreData[]
 ): GeoJSON.FeatureCollection<GeoJSON.Point, StoreFeatureProperties> => {
@@ -145,7 +208,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   >([]);
   const [businessCategories, setBusinessCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>(
-    "supermarket"
+    DEFAULT_COMPETITION_CATEGORY
   );
   const selectedCategoryRef = useRef(selectedCategory);
   const categorySelectionWasUserDriven = useRef(false);
@@ -254,19 +317,18 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       const currentCategory = selectedCategoryRef.current;
       let nextCategory = currentCategory;
       const hasCurrentCategory =
-        currentCategory === "all" ||
+        currentCategory === DEFAULT_COMPETITION_CATEGORY ||
         uniqueCategories.includes(currentCategory);
 
       if (uniqueCategories.length === 0) {
-        nextCategory = "all";
+        nextCategory = DEFAULT_COMPETITION_CATEGORY;
+      } else if (!hasCurrentCategory) {
+        nextCategory = DEFAULT_COMPETITION_CATEGORY;
       } else if (
-        !hasCurrentCategory ||
-        !categorySelectionWasUserDriven.current
+        !categorySelectionWasUserDriven.current &&
+        currentCategory !== DEFAULT_COMPETITION_CATEGORY
       ) {
-        const preferredCategory = uniqueCategories.includes("supermarket")
-          ? "supermarket"
-          : uniqueCategories[0] ?? "all";
-        nextCategory = preferredCategory;
+        nextCategory = DEFAULT_COMPETITION_CATEGORY;
       }
 
       if (nextCategory !== currentCategory) {
@@ -297,7 +359,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       );
 
       const filtered =
-        category === "all"
+        category === DEFAULT_COMPETITION_CATEGORY
           ? relevantFeatures
           : relevantFeatures.filter(
               (feature) => feature.properties.category === category
@@ -331,52 +393,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
 
     const selectionValue = selectionRef.current;
-    let selectedCityNames: string[] = [];
-
-    let storeHighlightFilter: FilterSpecification = [
-      "all",
-      ["!has", "point_count"],
-      ["==", "cityNormalized", "__none__"],
-    ] as unknown as FilterSpecification;
-
-    const storeBaseFilter = [
-      "!has",
-      "point_count",
-    ] as unknown as FilterSpecification;
-
-    if (selectionValue) {
-      switch (selectionValue.mode) {
-        case "city": {
-          selectedCityNames = [selectionValue.city];
-          storeHighlightFilter = [
-            "all",
-            ["!has", "point_count"],
-            ["==", "cityNormalized", normalizeName(selectionValue.city)],
-          ] as unknown as FilterSpecification;
-          break;
-        }
-        case "area": {
-          selectedCityNames = selectionValue.cities;
-          storeHighlightFilter = [
-            "all",
-            ["!has", "point_count"],
-            ["==", "areaNormalized", normalizeName(selectionValue.area)],
-          ] as unknown as FilterSpecification;
-          break;
-        }
-        case "zone": {
-          selectedCityNames = selectionValue.cities;
-          storeHighlightFilter = [
-            "all",
-            ["!has", "point_count"],
-            ["==", "zoneNormalized", normalizeName(selectionValue.zone)],
-          ] as unknown as FilterSpecification;
-          break;
-        }
-        default:
-          break;
-      }
-    }
+    const {
+      highlightFilter: storeHighlightFilter,
+      cityNames: selectedCityNames,
+    } = getStoreSelectionFilterContext(selectionValue);
+    const storeBaseFilter = createStoreBaseFilter();
 
     const cleanedNames = Array.from(
       new Set(
@@ -393,6 +414,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
     const clusterVisibility = selectionValue ? "none" : "visible";
     const highlightVisibility = selectionValue ? "visible" : "none";
+
+    const zoomLevel = map.getZoom();
+    const showAllStoreLabels = zoomLevel >= STORE_LABEL_VISIBILITY_ZOOM;
+    const storeLabelFilter = showAllStoreLabels
+      ? createStoreBaseFilter()
+      : storeHighlightFilter;
+    const showCompetitionLabels =
+      zoomLevel >= COMPETITION_LABEL_VISIBILITY_ZOOM;
 
     if (map.getLayer("store-points")) {
       map.setFilter("store-points", storeBaseFilter);
@@ -462,13 +491,19 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
 
     if (map.getLayer("store-labels")) {
-      map.setFilter("store-labels", storeHighlightFilter);
-      const zoom = map.getZoom();
-      const shouldShowLabels = Boolean(selectionValue) && zoom >= 11;
+      map.setFilter("store-labels", storeLabelFilter);
       map.setLayoutProperty(
         "store-labels",
         "visibility",
-        shouldShowLabels ? "visible" : "none"
+        showAllStoreLabels ? "visible" : "none"
+      );
+    }
+
+    if (map.getLayer("business-labels")) {
+      map.setLayoutProperty(
+        "business-labels",
+        "visibility",
+        showCompetitionLabels ? "visible" : "none"
       );
     }
 
@@ -630,8 +665,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     businessFeaturesRef.current = [];
     setBusinessCategories([]);
     categorySelectionWasUserDriven.current = false;
-    setSelectedCategory("all");
-    selectedCategoryRef.current = "all";
+    setSelectedCategory(DEFAULT_COMPETITION_CATEGORY);
+    selectedCategoryRef.current = DEFAULT_COMPETITION_CATEGORY;
 
     const styleUrl = darkMode
       ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
@@ -888,25 +923,38 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           },
         });
 
-          map.on("zoom", () => {
+          const handleZoomChange = () => {
             const zoomLevel = map.getZoom();
-            const hasSelection = Boolean(selectionRef.current);
-            const shouldShowStoreLabels = hasSelection && zoomLevel >= 11;
+            const showAllStoreLabels =
+              zoomLevel >= STORE_LABEL_VISIBILITY_ZOOM;
+            const { highlightFilter } = getStoreSelectionFilterContext(
+              selectionRef.current
+            );
+            const storeLabelFilter = showAllStoreLabels
+              ? createStoreBaseFilter()
+              : highlightFilter;
+
             if (map.getLayer("store-labels")) {
+              map.setFilter("store-labels", storeLabelFilter);
               map.setLayoutProperty(
                 "store-labels",
                 "visibility",
-                shouldShowStoreLabels ? "visible" : "none"
+                showAllStoreLabels ? "visible" : "none"
               );
             }
+
             if (map.getLayer("business-labels")) {
+              const showBusinessLabels =
+                zoomLevel >= COMPETITION_LABEL_VISIBILITY_ZOOM;
               map.setLayoutProperty(
                 "business-labels",
                 "visibility",
-                zoomLevel >= 12 ? "visible" : "none"
+                showBusinessLabels ? "visible" : "none"
               );
             }
-          });
+          };
+
+          map.on("zoom", handleZoomChange);
 
           // Popups for stores
           map.on("click", "store-points", (e) => {
@@ -1250,7 +1298,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       selection
     );
 
-    if (selectedCategory === "all") {
+    if (selectedCategory === DEFAULT_COMPETITION_CATEGORY) {
       return relevantBusinesses.length;
     }
 
@@ -1858,7 +1906,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               color: "rgba(226, 232, 240, 0.75)",
             }}
           >
-            {selectedCategory === "all"
+            {selectedCategory === DEFAULT_COMPETITION_CATEGORY
               ? "Showing all nearby businesses for this focus."
               : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
           </p>
