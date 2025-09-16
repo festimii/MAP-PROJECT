@@ -74,7 +74,11 @@ type BusinessProperties = {
   address: string | null;
   storeDepartment: string;
   areaName: string;
+  areaNormalized: string;
+  zoneName: string;
+  zoneNormalized: string;
   cityName?: string;
+  cityNormalized: string;
 };
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
@@ -163,12 +167,45 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       }
 
       const features = businessFeaturesRef.current;
-      const filtered =
-        category === "all"
-          ? features
-          : features.filter(
-              (feature) => feature.properties.category === category
-            );
+      const selectionValue = selectionRef.current;
+      let targetCity: string | null = null;
+      let targetArea: string | null = null;
+      let targetZone: string | null = null;
+
+      if (selectionValue) {
+        if (selectionValue.mode === "city") {
+          targetCity = normalizeName(selectionValue.city);
+        } else if (selectionValue.mode === "area") {
+          targetArea = normalizeName(selectionValue.area);
+        } else if (selectionValue.mode === "zone") {
+          targetZone = normalizeName(selectionValue.zone);
+        }
+      }
+
+      const filtered = features.filter((feature) => {
+        const props = feature.properties;
+        if (category !== "all" && props.category !== category) {
+          return false;
+        }
+
+        if (!selectionValue) {
+          return true;
+        }
+
+        if (selectionValue.mode === "city") {
+          return targetCity !== null && props.cityNormalized === targetCity;
+        }
+
+        if (selectionValue.mode === "area") {
+          return targetArea !== null && props.areaNormalized === targetArea;
+        }
+
+        if (selectionValue.mode === "zone") {
+          return targetZone !== null && props.zoneNormalized === targetZone;
+        }
+
+        return true;
+      });
 
       const featureCollection: GeoJSON.FeatureCollection<
         GeoJSON.Point,
@@ -254,6 +291,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       : (["in", nameKey, ""] as unknown as FilterSpecification);
 
     map.setFilter("city-highlight", highlightFilter);
+
+    const shouldFocusSelection = Boolean(selectionValue);
+    const baseLayerVisibility = shouldFocusSelection ? "none" : "visible";
+    const baseLayerIds = ["clusters", "cluster-count", "store-points"] as const;
+    for (const layerId of baseLayerIds) {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, "visibility", baseLayerVisibility);
+      }
+    }
 
     if (hasCitySelection) {
       map.setPaintProperty("city-boundaries", "fill-color", [
@@ -840,6 +886,16 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 return [];
               }
 
+              const areaName = store.Area_Name ?? "Unknown area";
+              const normalizedArea = normalizeName(areaName);
+              const zoneName = store.Zone_Name ?? "Unassigned Zone";
+              const normalizedZone = normalizeName(zoneName);
+              const fallbackCity =
+                store.City_Name && store.City_Name.trim().length > 0
+                  ? store.City_Name
+                  : areaName.replace(/ Area$/i, "");
+              const normalizedCity = normalizeName(fallbackCity);
+
               return store.NearbyBusinesses.filter(
                 (b) => b.Longitude && b.Latitude
               ).map((business) => {
@@ -866,8 +922,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     ),
                     address: business.Address,
                     storeDepartment: store.Department_Name,
-                    areaName: store.Area_Name,
-                    cityName: store.City_Name,
+                    areaName,
+                    areaNormalized: normalizedArea,
+                    zoneName,
+                    zoneNormalized: normalizedZone,
+                    cityName: store.City_Name ?? fallbackCity,
+                    cityNormalized: normalizedCity,
                   },
                 } satisfies GeoJSON.Feature<
                   GeoJSON.Point,
@@ -961,6 +1021,24 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
     updateBusinessSource(map, selectedCategory);
   }, [selectedCategory, updateBusinessSource]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!map.isStyleLoaded()) {
+      const applyAfterLoad = () =>
+        updateBusinessSource(map, selectedCategoryRef.current);
+      map.once("load", applyAfterLoad);
+      return () => {
+        map.off("load", applyAfterLoad);
+      };
+    }
+
+    updateBusinessSource(map, selectedCategoryRef.current);
+  }, [selection, updateBusinessSource]);
 
   const selectionSummary = useMemo(() => {
     if (!selection) {
