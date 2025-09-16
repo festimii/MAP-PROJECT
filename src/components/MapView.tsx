@@ -87,9 +87,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
     GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[]
   >([]);
   const [businessCategories, setBusinessCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>(
-    "supermarket"
-  );
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const selectedCategoryRef = useRef(selectedCategory);
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
@@ -426,11 +424,21 @@ export default function MapView({ selection, cities }: MapViewProps) {
           const storesRes = await fetch("http://localhost:4000/api/areas");
           if (storesRes.ok) {
             const stores: StoreData[] = await storesRes.json();
-            setStoresData(stores);
+            if (isMounted) {
+              setStoresData(stores);
+            }
             const features: GeoJSON.Feature[] = stores
               .filter((d) => d.Longitude !== null && d.Latitude !== null)
               .map((d) => {
-                const fallbackCity = d.City_Name ?? d.Area_Name.replace(/ Area$/i, "");
+                const rawCity = d.City_Name ?? "";
+                const cleanedCity = rawCity.trim();
+                const derivedCity = d.Area_Name.replace(/ Area$/i, "").trim();
+                const fallbackCity =
+                  cleanedCity.length > 0
+                    ? cleanedCity
+                    : derivedCity.length > 0
+                    ? derivedCity
+                    : d.Area_Name;
                 const zoneName = d.Zone_Name ?? "Unassigned Zone";
 
                 return {
@@ -1219,26 +1227,29 @@ export default function MapView({ selection, cities }: MapViewProps) {
           </div>
         </div>
       )}
-      {businessCategories.length > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 60,
-            left: 10,
-            zIndex: 1,
-            padding: "10px",
-            background: "rgba(17, 24, 39, 0.85)",
-            color: "#fff",
-            borderRadius: "6px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-            minWidth: "220px",
-          }}
-        >
+      <div
+        style={{
+          position: "absolute",
+          top: 60,
+          left: 10,
+          zIndex: 1,
+          padding: "12px",
+          background: "rgba(17, 24, 39, 0.85)",
+          color: "#fff",
+          borderRadius: "8px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          minWidth: "240px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div>
           <label
             htmlFor="business-category"
             style={{
               display: "block",
-              fontSize: "12px",
+              fontSize: "11px",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
               marginBottom: "6px",
@@ -1247,29 +1258,64 @@ export default function MapView({ selection, cities }: MapViewProps) {
           >
             Business Category
           </label>
-          <select
-            id="business-category"
-            value={selectedCategory}
-            onChange={(event) => setSelectedCategory(event.target.value)}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              borderRadius: "4px",
-              border: "1px solid rgba(255,255,255,0.3)",
-              background: "rgba(31, 41, 55, 0.95)",
-              color: "#f9fafb",
-              fontSize: "13px",
-            }}
-          >
-            <option value="all">All categories</option>
-            {businessCategories.map((category) => (
-              <option key={category} value={category}>
-                {humanizeCategory(category)}
-              </option>
-            ))}
-          </select>
+          {businessCategories.length > 0 ? (
+            <select
+              id="business-category"
+              value={selectedCategory}
+              onChange={(event) => setSelectedCategory(event.target.value)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                borderRadius: "4px",
+                border: "1px solid rgba(255,255,255,0.35)",
+                background: "rgba(31, 41, 55, 0.95)",
+                color: "#f9fafb",
+                fontSize: "13px",
+              }}
+            >
+              <option value="all">All categories</option>
+              {businessCategories.map((category) => (
+                <option key={category} value={category}>
+                  {humanizeCategory(category)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div
+              style={{
+                fontSize: "12px",
+                color: "rgba(226, 232, 240, 0.7)",
+                padding: "4px 0",
+              }}
+            >
+              Loading nearby business data…
+            </div>
+          )}
         </div>
-      )}
+        <button
+          type="button"
+          onClick={() => setDarkMode((prev) => !prev)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            border: "1px solid rgba(255,255,255,0.35)",
+            background: "rgba(31, 41, 55, 0.9)",
+            color: "#f9fafb",
+            padding: "6px 10px",
+            borderRadius: "9999px",
+            cursor: "pointer",
+            fontSize: "12px",
+            fontWeight: 600,
+            letterSpacing: "0.02em",
+          }}
+          title="Toggle between dark and light basemap styles"
+        >
+          <span aria-hidden="true">{darkMode ? "🌙" : "☀️"}</span>
+          {darkMode ? "Light basemap" : "Dark basemap"}
+        </button>
+      </div>
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
     </div>
   );
