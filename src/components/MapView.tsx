@@ -339,6 +339,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       ["==", "cityNormalized", "__none__"],
     ] as unknown as FilterSpecification;
 
+    const storeBaseFilter = [
+      "!has",
+      "point_count",
+    ] as unknown as FilterSpecification;
+
     if (selectionValue) {
       switch (selectionValue.mode) {
         case "city": {
@@ -386,14 +391,21 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       ? (["in", nameKey, ...cleanedNames] as unknown as FilterSpecification)
       : (["in", nameKey, ""] as unknown as FilterSpecification);
 
-    const storeVisibleFilter: FilterSpecification = selectionValue
-      ? storeHighlightFilter
-      : (["!has", "point_count"] as unknown as FilterSpecification);
-
     const clusterVisibility = selectionValue ? "none" : "visible";
+    const highlightVisibility = selectionValue ? "visible" : "none";
 
     if (map.getLayer("store-points")) {
-      map.setFilter("store-points", storeVisibleFilter);
+      map.setFilter("store-points", storeBaseFilter);
+      map.setPaintProperty(
+        "store-points",
+        "circle-opacity",
+        selectionValue ? 0.45 : 0.8
+      );
+      map.setPaintProperty(
+        "store-points",
+        "circle-color",
+        selectionValue ? "#fb7185" : "#ef4444"
+      );
     }
 
     if (map.getLayer("clusters")) {
@@ -406,6 +418,18 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
     map.setFilter("city-highlight", highlightFilter);
 
+    const boundaryOpacityExpression = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      6,
+      hasCitySelection ? 0.45 : 0.28,
+      8.5,
+      hasCitySelection ? 0.32 : 0.2,
+      10.5,
+      0,
+    ] as unknown as ExpressionSpecification;
+
     if (hasCitySelection) {
       map.setPaintProperty("city-boundaries", "fill-color", [
         "case",
@@ -413,20 +437,28 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         "#1d4ed8",
         "#4b5563",
       ] as ExpressionSpecification);
-      map.setPaintProperty("city-boundaries", "fill-opacity", [
-        "case",
-        ["in", ["get", nameKey], ["literal", cleanedNames]],
-        0.55,
-        0.2,
-      ]);
+      map.setPaintProperty(
+        "city-boundaries",
+        "fill-opacity",
+        boundaryOpacityExpression
+      );
     } else {
       map.setPaintProperty("city-boundaries", "fill-color", "#4b5563");
-      map.setPaintProperty("city-boundaries", "fill-opacity", 0.35);
+      map.setPaintProperty(
+        "city-boundaries",
+        "fill-opacity",
+        boundaryOpacityExpression
+      );
     }
 
     const highlightLayerExists = Boolean(map.getLayer("store-points-highlight"));
     if (highlightLayerExists) {
       map.setFilter("store-points-highlight", storeHighlightFilter);
+      map.setLayoutProperty(
+        "store-points-highlight",
+        "visibility",
+        highlightVisibility
+      );
     }
 
     if (map.getLayer("store-labels")) {
@@ -437,6 +469,28 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         "store-labels",
         "visibility",
         shouldShowLabels ? "visible" : "none"
+      );
+    }
+
+    if (map.getLayer("city-highlight")) {
+      map.setLayoutProperty("city-highlight", "visibility", highlightVisibility);
+      const highlightOpacityExpression = selectionValue
+        ? ([
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            6,
+            0.75,
+            8.5,
+            0.6,
+            10.5,
+            0,
+          ] as unknown as ExpressionSpecification)
+        : 0;
+      map.setPaintProperty(
+        "city-highlight",
+        "fill-extrusion-opacity",
+        highlightOpacityExpression
       );
     }
 
@@ -788,6 +842,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             "circle-color": "#ef4444",
             "circle-stroke-color": "#fff",
             "circle-stroke-width": 1,
+            "circle-opacity": 0.8,
           },
         });
 
@@ -1154,6 +1209,61 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     updateBusinessSource(map, selectedCategory);
   }, [selectedCategory, updateBusinessSource]);
 
+  const selectionCompetition = useMemo(() => {
+    if (!selection) {
+      return null;
+    }
+
+    const relevantBusinesses = filterBusinessFeaturesBySelection(
+      businessFeaturesRef.current,
+      selection
+    );
+
+    const counts = new Map<string, number>();
+    for (const feature of relevantBusinesses) {
+      const categoryKey = feature.properties?.category ?? "other";
+      counts.set(categoryKey, (counts.get(categoryKey) ?? 0) + 1);
+    }
+
+    const topCategories = Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([category, count]) => ({
+        category,
+        count,
+        label: humanizeCategory(category),
+      }));
+
+    return {
+      total: relevantBusinesses.length,
+      topCategories,
+    };
+  }, [selection, filterBusinessFeaturesBySelection, businessCategories]);
+
+  const visibleCompetitionCount = useMemo(() => {
+    if (!selection) {
+      return 0;
+    }
+
+    const relevantBusinesses = filterBusinessFeaturesBySelection(
+      businessFeaturesRef.current,
+      selection
+    );
+
+    if (selectedCategory === "all") {
+      return relevantBusinesses.length;
+    }
+
+    return relevantBusinesses.filter(
+      (feature) => feature.properties?.category === selectedCategory
+    ).length;
+  }, [
+    selection,
+    selectedCategory,
+    filterBusinessFeaturesBySelection,
+    businessCategories,
+  ]);
+
   const selectionSummary = useMemo(() => {
     if (!selection) {
       return null;
@@ -1386,8 +1496,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             style={{
               padding: "0 20px 12px",
               display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 12,
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: 14,
             }}
           >
             <div>
@@ -1470,8 +1580,59 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   : "0/0 mapped"}
               </p>
             </div>
-            {selectionSummary.topFormats.map(({ format, count }) => (
-              <div key={format}>
+            <div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  color: "rgba(148, 163, 184, 0.75)",
+                }}
+              >
+                Top formats
+              </p>
+              {selectionSummary.topFormats.length === 0 ? (
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    fontSize: 12,
+                    color: "rgba(148, 163, 184, 0.7)",
+                  }}
+                >
+                  Mix coming soon
+                </p>
+              ) : (
+                <ul
+                  style={{
+                    margin: "6px 0 0",
+                    padding: 0,
+                    listStyle: "none",
+                    display: "grid",
+                    gap: 6,
+                  }}
+                >
+                  {selectionSummary.topFormats.map(({ format, count }) => (
+                    <li
+                      key={format}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        color: "rgba(226, 232, 240, 0.85)",
+                        background: "rgba(59, 130, 246, 0.12)",
+                        border: "1px solid rgba(59, 130, 246, 0.18)",
+                        borderRadius: 8,
+                        padding: "6px 8px",
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>{format}</span>
+                      <span>{count}×</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {selectionCompetition && (
+              <div>
                 <p
                   style={{
                     margin: 0,
@@ -1479,20 +1640,66 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     color: "rgba(148, 163, 184, 0.75)",
                   }}
                 >
-                  {format}
+                  Competition snapshot
                 </p>
                 <p
                   style={{
                     margin: "2px 0 0",
                     fontSize: 14,
                     fontWeight: 600,
-                    color: "rgba(125, 211, 252, 0.95)",
+                    color: "#f1f5f9",
                   }}
                 >
-                  {count} store{count > 1 ? "s" : ""}
+                  {selectionCompetition.total > 0
+                    ? `${selectionCompetition.total.toLocaleString()} nearby location${
+                        selectionCompetition.total === 1 ? "" : "s"
+                      }`
+                    : "No competition data yet"}
                 </p>
+                {selectionCompetition.topCategories.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                    }}
+                  >
+                    {selectionCompetition.topCategories.map(
+                      ({ category, label, count }) => (
+                        <span
+                          key={category}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            fontSize: 11,
+                            background: "rgba(16, 185, 129, 0.16)",
+                            color: "rgba(167, 243, 208, 0.95)",
+                            border: "1px solid rgba(16, 185, 129, 0.22)",
+                            borderRadius: 9999,
+                            padding: "4px 10px",
+                          }}
+                        >
+                          {label}
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              color: "rgba(16, 185, 129, 0.95)",
+                              background: "rgba(16, 185, 129, 0.12)",
+                              padding: "1px 6px",
+                              borderRadius: 9999,
+                            }}
+                          >
+                            {count}
+                          </span>
+                        </span>
+                      )
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
+            )}
           </div>
           <div
             style={{
@@ -1579,30 +1786,46 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         <div
           style={{
             position: "absolute",
-            top: 60,
+            top: 68,
             left: 10,
-            zIndex: 1,
-            padding: "10px",
-            background: "rgba(17, 24, 39, 0.85)",
-            color: "#fff",
-            borderRadius: "6px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-            minWidth: "220px",
+            zIndex: 2,
+            width: 250,
+            padding: "14px 16px",
+            background: "rgba(17, 24, 39, 0.82)",
+            color: "#f9fafb",
+            borderRadius: "12px",
+            boxShadow: "0 16px 35px rgba(15,23,42,0.4)",
+            border: "1px solid rgba(148, 163, 184, 0.28)",
+            backdropFilter: "blur(6px)",
           }}
         >
-          <label
-            htmlFor="business-category"
+          <div
             style={{
-              display: "block",
-              fontSize: "12px",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              marginBottom: "6px",
-              color: "#d1d5db",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 8,
             }}
           >
-            Business Category
-          </label>
+            <span
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(148, 163, 184, 0.75)",
+              }}
+            >
+              Competition filter
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                color: "rgba(148, 163, 184, 0.75)",
+              }}
+            >
+              {visibleCompetitionCount.toLocaleString()} shown
+            </span>
+          </div>
           <select
             id="business-category"
             value={selectedCategory}
@@ -1610,13 +1833,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               categorySelectionWasUserDriven.current = true;
               setSelectedCategory(event.target.value);
             }}
+            aria-label="Business category filter"
             style={{
               width: "100%",
-              padding: "6px 10px",
-              borderRadius: "4px",
-              border: "1px solid rgba(255,255,255,0.3)",
-              background: "rgba(31, 41, 55, 0.95)",
-              color: "#f9fafb",
+              padding: "8px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(148,163,184,0.35)",
+              background: "rgba(31, 41, 55, 0.9)",
+              color: "#f8fafc",
               fontSize: "13px",
             }}
           >
@@ -1627,8 +1851,136 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               </option>
             ))}
           </select>
+          <p
+            style={{
+              margin: "8px 0 0",
+              fontSize: 12,
+              color: "rgba(226, 232, 240, 0.75)",
+            }}
+          >
+            {selectedCategory === "all"
+              ? "Showing all nearby businesses for this focus."
+              : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
+          </p>
+          {visibleCompetitionCount === 0 && (
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: 11,
+                color: "rgba(148, 163, 184, 0.7)",
+              }}
+            >
+              No mapped businesses for this filter yet.
+            </p>
+          )}
         </div>
       )}
+      <div
+        style={{
+          position: "absolute",
+          left: 10,
+          bottom: 20,
+          zIndex: 2,
+          width: 230,
+          padding: "12px 16px",
+          background: "rgba(17, 24, 39, 0.78)",
+          color: "#f1f5f9",
+          borderRadius: 12,
+          boxShadow: "0 16px 32px rgba(15,23,42,0.38)",
+          border: "1px solid rgba(148, 163, 184, 0.24)",
+          backdropFilter: "blur(6px)",
+        }}
+      >
+        <p
+          style={{
+            margin: 0,
+            fontSize: 11,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "rgba(148, 163, 184, 0.7)",
+          }}
+        >
+          Map legend
+        </p>
+        <div
+          style={{
+            marginTop: 8,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: "#ef4444",
+                border: "2px solid rgba(248, 250, 252, 0.7)",
+                opacity: 0.85,
+              }}
+            />
+            <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
+              Viva Fresh stores
+            </span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                background: "#f97316",
+                border: "2px solid rgba(255, 255, 255, 0.8)",
+              }}
+            />
+            <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
+              Focused stores
+            </span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: "50%",
+                background: "#10b981",
+                border: "2px solid rgba(248, 250, 252, 0.7)",
+              }}
+            />
+            <span style={{ fontSize: 12, color: "rgba(226, 232, 240, 0.85)" }}>
+              Nearby competition
+            </span>
+          </div>
+        </div>
+        <p
+          style={{
+            margin: "10px 0 0",
+            fontSize: 10,
+            color: "rgba(148, 163, 184, 0.6)",
+          }}
+        >
+          Zoom in to reveal detailed labels.
+        </p>
+      </div>
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
     </div>
   );
