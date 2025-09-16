@@ -55,25 +55,27 @@ async function saveBusinessesToDB(pool, departmentCode, businesses) {
       .input("Longitude", b.Longitude)
       .input("Address", b.Address).query(`
         INSERT INTO StoreNearbyBusiness
-        (Store_Department_Code, OSM_Id, Name, Category, Latitude, Longitude, Address)
-        VALUES (@Store_Department_Code, @OSM_Id, @Name, @Category, @Latitude, @Longitude, @Address)
+        (Store_Department_Code, OSM_Id, Name, Category, Latitude, Longitude, Address, RetrievedAt)
+        VALUES (@Store_Department_Code, @OSM_Id, @Name, @Category, @Latitude, @Longitude, @Address, GETDATE())
       `);
   }
 }
 
-router.get("/stores-with-businesses", async (req, res) => {
+router.get("/stores-with-businesses", async (_req, res) => {
   try {
     const pool = await getPool();
 
+    // ✅ Removed Zone_Code/Zone_Name
     const result = await pool.request().query(`
       SELECT DISTINCT
+        o.Region_Code,
+        LTRIM(RTRIM(o.Region_Name)) AS Region_Name,
         o.Area_Code,
         LTRIM(RIGHT(o.Area_Name, LEN(o.Area_Name) - CHARINDEX('-', o.Area_Name))) AS Area_Name,
-        o.Zone_Code,
-        LTRIM(RTRIM(o.Zone_Name)) AS Zone_Name,
         o.Department_Code,
         o.Department_Name,
-        o.City_Name,
+        o.City_Code,
+        LTRIM(RTRIM(o.City_Name)) AS City_Name,
         s.SQM,
         s.Longitude,
         s.Latitude,
@@ -82,7 +84,7 @@ router.get("/stores-with-businesses", async (req, res) => {
       FROM OrgUnitArea o
       LEFT JOIN Storesqm s ON o.Department_Code = s.Department_Code
       WHERE o.Area_Name IS NOT NULL
-      ORDER BY LTRIM(RIGHT(o.Area_Name, LEN(o.Area_Name) - CHARINDEX('-', o.Area_Name)));
+      ORDER BY o.Area_Code, o.Department_Code;
     `);
 
     const enriched = [];
@@ -91,7 +93,7 @@ router.get("/stores-with-businesses", async (req, res) => {
       let businesses = [];
 
       if (row.Latitude && row.Longitude) {
-        // 1. Check cache
+        // 1. Check cached businesses
         const cached = await pool
           .request()
           .input("Store_Department_Code", row.Department_Code).query(`
@@ -103,7 +105,7 @@ router.get("/stores-with-businesses", async (req, res) => {
         if (cached.recordset.length > 0) {
           businesses = cached.recordset;
         } else {
-          // 2. Fetch fresh
+          // 2. Fetch fresh businesses
           businesses = await fetchOSMBusinesses(
             row.Latitude,
             row.Longitude,
@@ -115,7 +117,7 @@ router.get("/stores-with-businesses", async (req, res) => {
             await saveBusinessesToDB(pool, row.Department_Code, businesses);
           }
 
-          // avoid hammering OSM → wait 1 second
+          // Throttle requests to OSM → avoid hammering
           await new Promise((r) => setTimeout(r, 1000));
         }
       }
