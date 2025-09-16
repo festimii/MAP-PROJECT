@@ -10,7 +10,7 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 
 import MapView from "./components/MapView";
 import ReportView from "./components/ReportView";
@@ -54,7 +54,6 @@ const resolveMapSelection = (
 };
 
 export default function App() {
-  const navigate = useNavigate();
   const [filterMode, setFilterMode] = useState<FilterMode>("city");
   const [selectedItem, setSelectedItem] = useState<SidebarItem | null>(null);
   const { cities, cityItems, areaItems, zoneItems, stores, loading, error } =
@@ -131,8 +130,6 @@ export default function App() {
 
   const handleSelectItem = (item: SidebarItem) => {
     setSelectedItem(item);
-    if (item.type === "city") {
-    }
   };
 
   const handleBack = () => {
