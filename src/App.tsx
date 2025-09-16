@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Card, CardActionArea, CardContent } from "@mui/material";
-
 import {
   AppBar,
   Toolbar,
@@ -22,7 +21,7 @@ import {
 import { Menu as MenuIcon, LocationCity, Map } from "@mui/icons-material";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import axios from "axios";
-import MapView from "./components/MapView";
+import MapView, { type MapSelection } from "./components/MapView";
 import ReportView from "./components/ReportView";
 
 const drawerWidth = 300;
@@ -53,27 +52,37 @@ const darkTheme = createTheme({
   },
 });
 
+type City = { City_Code: number; City_Name: string };
+type Area = {
+  Area_Code: string;
+  Area_Name: string;
+  Cities: string[];
+  Departments: {
+    Department_Code: string;
+    Department_Name: string;
+    SQM: number;
+  }[];
+};
+
+type SidebarCityItem = { code: number; name: string; type: "city" };
+type SidebarAreaItem = {
+  code: string;
+  name: string;
+  type: "area";
+  cities: string[];
+  Departments: Area["Departments"];
+};
+
+type SidebarItem = SidebarCityItem | SidebarAreaItem;
+
 export default function App() {
   const [filterByCity, setFilterByCity] = useState(true);
-  const [selectedItem, setSelectedItem] = useState<any | null>(null);
-  const [cityList, setCityList] = useState<
-    { City_Code: number; City_Name: string }[]
-  >([]);
-  const [areaList, setAreaList] = useState<
-    {
-      Area_Code: string;
-      Area_Name: string;
-      Cities: string[];
-      Departments: {
-        Department_Code: string;
-        Department_Name: string;
-        SQM: number;
-      }[];
-    }[]
-  >([]);
+  const [selectedItem, setSelectedItem] = useState<SidebarItem | null>(null);
+  const [cityList, setCityList] = useState<City[]>([]);
+  const [areaList, setAreaList] = useState<Area[]>([]);
   const navigate = useNavigate();
 
-  // Load cities/areas from API
+  // Load cities and areas
   useEffect(() => {
     axios
       .get("http://localhost:4000/api/cities")
@@ -88,10 +97,9 @@ export default function App() {
     setSelectedItem(null);
   };
 
-  const handleSelect = (item: any) => {
+  const handleSelect = (item: SidebarItem) => {
     setSelectedItem(item);
-
-    if (filterByCity) {
+    if (item.type === "city") {
       navigate(`/report/${encodeURIComponent(item.name)}`);
     }
   };
@@ -100,10 +108,25 @@ export default function App() {
     setSelectedItem(null);
   };
 
+  const mapSelection: MapSelection | null = filterByCity
+    ? selectedItem?.type === "city"
+      ? { mode: "city", city: selectedItem.name }
+      : null
+    : selectedItem?.type === "area"
+      ? {
+          mode: "area",
+          area: selectedItem.name,
+          cities: selectedItem.cities,
+        }
+      : null;
+
   // Sidebar content
   let drawerContent;
-  if (!filterByCity && selectedItem) {
-    // Detail mode for an area
+  const areaItem =
+    !filterByCity && selectedItem?.type === "area" ? selectedItem : null;
+
+  if (areaItem) {
+    // Detail mode (Area with departments)
     drawerContent = (
       <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
         <Toolbar />
@@ -116,9 +139,9 @@ export default function App() {
           >
             ← Back to Areas
           </Button>
-          <Typography variant="h6">{selectedItem.name}</Typography>
+          <Typography variant="h6">{areaItem.name}</Typography>
           <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            Cities: {selectedItem.cities.join(", ")}
+            Cities: {areaItem.cities.join(", ")}
           </Typography>
         </Box>
 
@@ -128,35 +151,31 @@ export default function App() {
             Departments
           </Typography>
 
-          {selectedItem.Departments?.map((d: any) => (
+          {areaItem.Departments?.map((department) => (
             <Card
-              key={d.Department_Code}
+              key={department.Department_Code}
               variant="outlined"
               sx={{
                 mb: 1.5,
                 borderRadius: 2,
                 bgcolor: "background.default",
-                "&:hover": {
-                  boxShadow: 3,
-                  borderColor: "primary.main",
-                },
+                "&:hover": { boxShadow: 3, borderColor: "primary.main" },
               }}
             >
               <CardActionArea
-                onClick={() => {
-                  // You can navigate or show a detail modal here
-                  console.log("Selected department:", d);
-                }}
+                onClick={() =>
+                  console.log("Selected department:", department)
+                }
               >
                 <CardContent>
                   <Typography variant="body2" fontWeight="bold">
-                    {d.Department_Name}
+                    {department.Department_Name}
                   </Typography>
                   <Typography
                     variant="caption"
                     sx={{ color: "text.secondary", display: "block" }}
                   >
-                    Madhesia Pikes: {d.SQM}
+                    Madhesia Pikes: {department.SQM}
                   </Typography>
                 </CardContent>
               </CardActionArea>
@@ -166,14 +185,19 @@ export default function App() {
       </Box>
     );
   } else {
-    // Normal list mode
-    const items = filterByCity
-      ? cityList.map((c) => ({ code: c.City_Code, name: c.City_Name }))
+    // City/Area list mode
+    const items: SidebarItem[] = filterByCity
+      ? cityList.map((c) => ({
+          code: c.City_Code,
+          name: c.City_Name,
+          type: "city" as const,
+        }))
       : areaList.map((a) => ({
           code: a.Area_Code,
           name: a.Area_Name,
           cities: a.Cities,
           Departments: a.Departments,
+          type: "area" as const,
         }));
 
     drawerContent = (
@@ -204,7 +228,7 @@ export default function App() {
             {items.map((item) => (
               <ListItemButton
                 key={item.code}
-                selected={selectedItem && selectedItem.code === item.code}
+                selected={selectedItem?.code === item.code}
                 onClick={() => handleSelect(item)}
                 sx={{
                   borderRadius: 2,
@@ -242,6 +266,7 @@ export default function App() {
     <ThemeProvider theme={darkTheme}>
       <Box sx={{ display: "flex", minHeight: "100vh", width: "100%" }}>
         <CssBaseline />
+
         {/* Navbar */}
         <AppBar
           position="fixed"
@@ -301,9 +326,7 @@ export default function App() {
                 path="/"
                 element={
                   <MapView
-                    selected={
-                      filterByCity ? selectedItem?.name : selectedItem?.cities
-                    }
+                    selection={mapSelection}
                     cities={cityList}
                   />
                 }
