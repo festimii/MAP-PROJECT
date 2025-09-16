@@ -12,7 +12,7 @@ export type MapSelection =
   | { mode: "area"; area: string; cities: string[] }
   | { mode: "zone"; zone: string; cities: string[]; areas: string[] };
 
-type StoreData = {
+export type StoreData = {
   Area_Code: string;
   Area_Name: string;
   Zone_Code?: string | null;
@@ -53,6 +53,19 @@ type StoreFeatureProperties = {
   zoneNormalized: string;
 };
 
+type ZoneApiStore = {
+  Zone_Code: string | null;
+  Zone_Name: string;
+  Area_Code: string | null;
+  Area_Name: string;
+  City_Name: string | null;
+  SQM: number | null;
+  Longitude: number | null;
+  Latitude: number | null;
+  Adresse: string | null;
+  Format: string | null;
+};
+
 type BusinessProperties = {
   id: number;
   name: string;
@@ -69,6 +82,7 @@ const normalizeName = (value: string) => value.toLowerCase().trim();
 type MapViewProps = {
   selection: MapSelection | null;
   cities: { City_Code: number; City_Name: string }[];
+  stores?: StoreData[];
 };
 
 const humanizeCategory = (value: string) =>
@@ -78,7 +92,50 @@ const humanizeCategory = (value: string) =>
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ") || "Other";
 
-export default function MapView({ selection, cities }: MapViewProps) {
+const buildStoreFeatureCollection = (
+  stores: StoreData[]
+): GeoJSON.FeatureCollection<GeoJSON.Point, StoreFeatureProperties> => {
+  const features: GeoJSON.Feature<GeoJSON.Point, StoreFeatureProperties>[] = [];
+
+  for (const store of stores) {
+    if (store.Longitude === null || store.Latitude === null) {
+      continue;
+    }
+
+    const areaName = store.Area_Name ?? "Unknown area";
+    const fallbackCity = store.City_Name && store.City_Name.trim().length > 0
+      ? store.City_Name
+      : areaName.replace(/ Area$/i, "");
+    const zoneName = store.Zone_Name ?? "Unassigned Zone";
+
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [store.Longitude, store.Latitude],
+      },
+      properties: {
+        department: store.Department_Name,
+        city: fallbackCity,
+        cityNormalized: normalizeName(fallbackCity),
+        area: areaName,
+        areaNormalized: normalizeName(areaName),
+        address: store.Adresse ?? null,
+        format: store.Format ?? null,
+        sqm: store.SQM ?? 0,
+        zone: zoneName,
+        zoneNormalized: normalizeName(zoneName),
+      },
+    });
+  }
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+};
+
+export default function MapView({ selection, cities, stores }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const navigate = useNavigate();
@@ -94,7 +151,8 @@ export default function MapView({ selection, cities }: MapViewProps) {
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
   const selectionRef = useRef<MapSelection | null>(null);
-  const [storesData, setStoresData] = useState<StoreData[]>([]);
+  const [storesData, setStoresData] = useState<StoreData[]>(stores ?? []);
+  const initialStoresRef = useRef<StoreData[] | undefined>(stores);
   const previousSelectionHadValue = useRef(false);
 
   const updateBusinessSource = useCallback(
@@ -308,6 +366,34 @@ export default function MapView({ selection, cities }: MapViewProps) {
     applySelectionToMap();
   }, [selection, applySelectionToMap]);
 
+  useEffect(() => {
+    if (stores === undefined) {
+      return;
+    }
+
+    setStoresData(stores);
+
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const updateSource = () => {
+      const source = map.getSource("stores") as maplibregl.GeoJSONSource | null;
+      if (source) {
+        source.setData(buildStoreFeatureCollection(stores));
+        applySelectionToMap();
+      }
+    };
+
+    if (!map.isStyleLoaded()) {
+      map.once("load", updateSource);
+      return;
+    }
+
+    updateSource();
+  }, [stores, applySelectionToMap]);
+
   // Initial map setup
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -423,136 +509,151 @@ export default function MapView({ selection, cities }: MapViewProps) {
         });
 
         // --- Store points with clustering ---
-          const storesRes = await fetch("http://localhost:4000/api/areas");
-          if (storesRes.ok) {
-            const stores: StoreData[] = await storesRes.json();
-            setStoresData(stores);
-            const features: GeoJSON.Feature[] = stores
-              .filter((d) => d.Longitude !== null && d.Latitude !== null)
-              .map((d) => {
-                const fallbackCity = d.City_Name ?? d.Area_Name.replace(/ Area$/i, "");
-                const zoneName = d.Zone_Name ?? "Unassigned Zone";
+        let storesForSource = initialStoresRef.current ?? [];
 
-                return {
-                  type: "Feature",
-                  geometry: {
-                    type: "Point",
-                    coordinates: [d.Longitude as number, d.Latitude as number],
-                  },
-                  properties: {
-                    department: d.Department_Name,
-                    city: fallbackCity,
-                    cityNormalized: normalizeName(fallbackCity),
-                    area: d.Area_Name,
-                    areaNormalized: normalizeName(d.Area_Name),
-                    address: d.Adresse ?? null,
-                    format: d.Format ?? null,
-                    sqm: d.SQM ?? 0,
-                    zone: zoneName,
-                    zoneNormalized: normalizeName(zoneName),
-                  } satisfies StoreFeatureProperties,
+        if (!storesForSource.length) {
+          try {
+            const storesRes = await fetch("http://localhost:4000/api/zones");
+            if (storesRes.ok) {
+              const raw: ZoneApiStore[] = await storesRes.json();
+              const collected: StoreData[] = [];
+              for (const item of raw) {
+                const departmentCode = String(
+                  item.Zone_Code ?? item.Zone_Name ?? ""
+                ).trim();
+                if (!departmentCode) {
+                  continue;
+                }
+
+                const store: StoreData = {
+                  Area_Code: item.Area_Code ?? "",
+                  Area_Name: item.Area_Name ?? "Unknown area",
+                  Department_Code: departmentCode,
+                  Department_Name: item.Zone_Name,
+                  SQM: item.SQM,
+                  Longitude: item.Longitude,
+                  Latitude: item.Latitude,
+                  Adresse: item.Adresse,
+                  Format: item.Format,
+                  City_Name: item.City_Name ?? undefined,
+                  Zone_Code: item.Zone_Code ?? undefined,
+                  Zone_Name: item.Zone_Name ?? undefined,
                 };
-              });
 
-            map.addSource("stores", {
-              type: "geojson",
-              data: { type: "FeatureCollection", features },
-              cluster: true,
-              clusterRadius: 50,
-            });
+                collected.push(store);
+              }
+              storesForSource = collected;
+            } else {
+              console.warn("Failed to load stores from API");
+            }
+          } catch (storeErr) {
+            console.error("Failed to load store data:", storeErr);
+          }
+        }
 
-          // Cluster circles
-          map.addLayer({
-            id: "clusters",
-            type: "circle",
-            source: "stores",
-            filter: ["has", "point_count"],
-            paint: {
-              "circle-color": "#2563eb",
-              "circle-radius": [
-                "step",
-                ["get", "point_count"],
-                15,
-                10,
-                20,
-                50,
-                25,
-              ],
-              "circle-stroke-color": "#fff",
-              "circle-stroke-width": 1,
-            },
-          });
+        if (isMounted) {
+          setStoresData(storesForSource);
+        }
 
-          // Cluster count labels
-          map.addLayer({
-            id: "cluster-count",
-            type: "symbol",
-            source: "stores",
-            filter: ["has", "point_count"],
-            layout: {
-              "text-field": "{point_count_abbreviated}",
-              "text-size": 12,
-            },
-            paint: {
-              "text-color": "#fff",
-            },
-          });
+        map.addSource("stores", {
+          type: "geojson",
+          data: buildStoreFeatureCollection(storesForSource),
+          cluster: true,
+          clusterRadius: 50,
+        });
 
-          // Individual store points
-          map.addLayer({
-            id: "store-points",
-            type: "circle",
-            source: "stores",
-            filter: ["!has", "point_count"],
-            paint: {
-              "circle-radius": 6,
-              "circle-color": "#ef4444",
-              "circle-stroke-color": "#fff",
-              "circle-stroke-width": 1,
-            },
-          });
-
-          map.addLayer({
-            id: "store-points-highlight",
-            type: "circle",
-            source: "stores",
-            filter: [
-              "all",
-              ["!has", "point_count"],
-              ["==", "cityNormalized", "__none__"],
+        // Cluster circles
+        map.addLayer({
+          id: "clusters",
+          type: "circle",
+          source: "stores",
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": "#2563eb",
+            "circle-radius": [
+              "step",
+              ["get", "point_count"],
+              15,
+              10,
+              20,
+              50,
+              25,
             ],
-            paint: {
-              "circle-radius": 9,
-              "circle-color": "#f97316",
-              "circle-stroke-color": "#fff",
-              "circle-stroke-width": 2,
-              "circle-opacity": 0.9,
-            },
-          });
+            "circle-stroke-color": "#fff",
+            "circle-stroke-width": 1,
+          },
+        });
 
-          // Store labels (toggle with zoom)
-          map.addLayer({
-            id: "store-labels",
-            type: "symbol",
-            source: "stores",
-            filter: [
-              "all",
-              ["!has", "point_count"],
-              ["==", "cityNormalized", "__none__"],
-            ],
-            layout: {
-              "text-field": ["get", "department"],
-              "text-size": 12,
-              "text-offset": [0, 1.2],
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              visibility: "none",
-            },
-            paint: {
-              "text-color": "#111827",
-              "text-halo-color": "#ffffff",
-              "text-halo-width": 2,
-            },
-          });
+        // Cluster count labels
+        map.addLayer({
+          id: "cluster-count",
+          type: "symbol",
+          source: "stores",
+          filter: ["has", "point_count"],
+          layout: {
+            "text-field": "{point_count_abbreviated}",
+            "text-size": 12,
+          },
+          paint: {
+            "text-color": "#fff",
+          },
+        });
+
+        // Individual store points
+        map.addLayer({
+          id: "store-points",
+          type: "circle",
+          source: "stores",
+          filter: ["!has", "point_count"],
+          paint: {
+            "circle-radius": 6,
+            "circle-color": "#ef4444",
+            "circle-stroke-color": "#fff",
+            "circle-stroke-width": 1,
+          },
+        });
+
+        map.addLayer({
+          id: "store-points-highlight",
+          type: "circle",
+          source: "stores",
+          filter: [
+            "all",
+            ["!has", "point_count"],
+            ["==", "cityNormalized", "__none__"],
+          ],
+          paint: {
+            "circle-radius": 9,
+            "circle-color": "#f97316",
+            "circle-stroke-color": "#fff",
+            "circle-stroke-width": 2,
+            "circle-opacity": 0.9,
+          },
+        });
+
+        // Store labels (toggle with zoom)
+        map.addLayer({
+          id: "store-labels",
+          type: "symbol",
+          source: "stores",
+          filter: [
+            "all",
+            ["!has", "point_count"],
+            ["==", "cityNormalized", "__none__"],
+          ],
+          layout: {
+            "text-field": ["get", "department"],
+            "text-size": 12,
+            "text-offset": [0, 1.2],
+            "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+            visibility: "none",
+          },
+          paint: {
+            "text-color": "#111827",
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 2,
+          },
+        });
 
           map.on("zoom", () => {
             const zoomLevel = map.getZoom();
@@ -669,7 +770,6 @@ export default function MapView({ selection, cities }: MapViewProps) {
           map.on("mouseleave", "clusters", () => {
             map.getCanvas().style.cursor = "";
           });
-        }
 
         map.addSource("businesses", {
           type: "geojson",
@@ -916,6 +1016,10 @@ export default function MapView({ selection, cities }: MapViewProps) {
       formats.set(key, (formats.get(key) ?? 0) + 1);
     }
 
+    const geocodedCount = matchingStores.filter(
+      (store) => store.Latitude !== null && store.Longitude !== null
+    ).length;
+
     const topFormats = Array.from(formats.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
@@ -930,6 +1034,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
       stores: matchingStores,
       storeCount: matchingStores.length,
       totalSQM,
+      geocodedCount,
       topFormats,
     };
   }, [selection, storesData]);
@@ -995,6 +1100,27 @@ export default function MapView({ selection, cities }: MapViewProps) {
             >
               {selectionSummary.label}
             </h3>
+            {selectionSummary.mode === "city" && (
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(`/report/${encodeURIComponent(selectionSummary.label)}`)
+                }
+                style={{
+                  marginTop: 10,
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 9999,
+                  border: "1px solid rgba(96,165,250,0.6)",
+                  background: "rgba(191, 219, 254, 0.18)",
+                  color: "#bae6fd",
+                  cursor: "pointer",
+                }}
+              >
+                Open layered report
+              </button>
+            )}
             <div
               style={{
                 marginTop: 8,
@@ -1112,6 +1238,44 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 }}
               >
                 {selectionSummary.totalSQM.toLocaleString()} m²
+              </p>
+            </div>
+            <div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  color: "rgba(148, 163, 184, 0.75)",
+                }}
+              >
+                Geo coverage
+              </p>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 16,
+                  fontWeight: 600,
+                  color: "#f1f5f9",
+                }}
+              >
+                {selectionSummary.storeCount > 0
+                  ? `${Math.round(
+                      (selectionSummary.geocodedCount /
+                        selectionSummary.storeCount) *
+                        100
+                    )}%`
+                  : "0%"}
+              </p>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  fontSize: 11,
+                  color: "rgba(148, 163, 184, 0.75)",
+                }}
+              >
+                {selectionSummary.storeCount > 0
+                  ? `${selectionSummary.geocodedCount}/${selectionSummary.storeCount} mapped`
+                  : "0/0 mapped"}
               </p>
             </div>
             {selectionSummary.topFormats.map(({ format, count }) => (
