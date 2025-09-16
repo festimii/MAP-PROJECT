@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardActionArea, CardContent } from "@mui/material";
 import {
   AppBar,
@@ -19,10 +19,18 @@ import {
   ToggleButtonGroup,
   Chip,
 } from "@mui/material";
-import { Menu as MenuIcon, LocationCity, Map, Layers } from "@mui/icons-material";
+import {
+  Menu as MenuIcon,
+  LocationCity,
+  Map as MapIcon,
+  Layers,
+} from "@mui/icons-material";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import axios from "axios";
-import MapView, { type MapSelection } from "./components/MapView";
+import MapView, {
+  type MapSelection,
+  type StoreWithBusinesses,
+} from "./components/MapView";
 import ReportView from "./components/ReportView";
 
 const drawerWidth = 300;
@@ -53,7 +61,7 @@ const darkTheme = createTheme({
   },
 });
 
-type City = { City_Code: number; City_Name: string };
+type City = { City_Code: string; City_Name: string };
 type Department = {
   Department_Code: string;
   Department_Name: string;
@@ -67,6 +75,8 @@ type Department = {
   Area_Name?: string | null;
   Zone_Code?: string | null;
   Zone_Name?: string | null;
+  Region_Code?: string | null;
+  Region_Name?: string | null;
 };
 
 type Area = {
@@ -86,7 +96,7 @@ type Zone = {
   Departments: Department[];
 };
 
-type SidebarCityItem = { code: number; name: string; type: "city" };
+type SidebarCityItem = { code: string; name: string; type: "city" };
 type SidebarAreaItem = {
   code: string;
   name: string;
@@ -106,28 +116,215 @@ type SidebarZoneItem = {
 
 type SidebarItem = SidebarCityItem | SidebarAreaItem | SidebarZoneItem;
 
+const slugify = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
 export default function App() {
   const [filterMode, setFilterMode] = useState<"city" | "area" | "zone">(
     "city"
   );
   const [selectedItem, setSelectedItem] = useState<SidebarItem | null>(null);
-  const [cityList, setCityList] = useState<City[]>([]);
-  const [areaList, setAreaList] = useState<Area[]>([]);
-  const [zoneList, setZoneList] = useState<Zone[]>([]);
+  const [stores, setStores] = useState<StoreWithBusinesses[]>([]);
   const navigate = useNavigate();
 
-  // Load cities and areas
   useEffect(() => {
     axios
-      .get<City[]>("http://localhost:4000/api/cities")
-      .then((res) => setCityList(res.data));
-    axios
-      .get<Area[]>("http://localhost:4000/api/areas/filters")
-      .then((res) => setAreaList(res.data));
-    axios
-      .get<Zone[]>("http://localhost:4000/api/zones")
-      .then((res) => setZoneList(res.data));
+      .get<StoreWithBusinesses[]>(
+        "http://localhost:4000/api/combined/stores-with-businesses"
+      )
+      .then((res) => {
+        const normalized = res.data.map((store) => {
+          const areaName = (store.Area_Name ?? "").trim() || "Unassigned Area";
+          const cityName = store.City_Name?.trim() || null;
+          const regionName = store.Region_Name?.trim() || null;
+          const regionCode =
+            store.Region_Code != null && store.Region_Code !== ""
+              ? String(store.Region_Code)
+              : null;
+          const zoneName =
+            store.Zone_Name?.trim() ||
+            regionName ||
+            "Unassigned Region";
+          const zoneCodeRaw =
+            store.Zone_Code != null && store.Zone_Code !== ""
+              ? store.Zone_Code
+              : regionCode;
+          const zoneCode = zoneCodeRaw
+            ? String(zoneCodeRaw)
+            : `zone-${slugify(zoneName)}`;
+
+          return {
+            ...store,
+            Area_Name: areaName,
+            City_Name: cityName,
+            Zone_Name: zoneName,
+            Zone_Code: zoneCode,
+            Region_Name: regionName,
+            Region_Code: regionCode,
+          } satisfies StoreWithBusinesses;
+        });
+
+        setStores(normalized);
+      })
+      .catch((error) => {
+        console.error("Failed to load store data", error);
+      });
   }, []);
+
+  const cityList = useMemo<City[]>(() => {
+    const map = new Map<string, City>();
+
+    for (const store of stores) {
+      const rawName = store.City_Name?.trim();
+      const fallback = store.Area_Name?.replace(/ Area$/i, "").trim();
+      const cityName = rawName && rawName.length > 0 ? rawName : fallback;
+      if (!cityName) continue;
+
+      const key = cityName.toLowerCase();
+      if (!map.has(key)) {
+        const codeCandidate =
+          store.City_Code != null && store.City_Code !== ""
+            ? String(store.City_Code)
+            : key;
+        map.set(key, { City_Code: codeCandidate, City_Name: cityName });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.City_Name.localeCompare(b.City_Name)
+    );
+  }, [stores]);
+
+  const areaList = useMemo<Area[]>(() => {
+    const grouped = new Map<string, Area & { CitySet: Set<string> }>();
+
+    for (const store of stores) {
+      const areaName = store.Area_Name ?? "Unassigned Area";
+      const areaCode =
+        store.Area_Code != null && store.Area_Code !== ""
+          ? String(store.Area_Code)
+          : `area-${slugify(areaName)}`;
+      const zoneName = store.Zone_Name ?? "Unassigned Region";
+      const zoneCode =
+        store.Zone_Code != null && store.Zone_Code !== ""
+          ? String(store.Zone_Code)
+          : `zone-${slugify(zoneName)}`;
+
+      if (!grouped.has(areaCode)) {
+        grouped.set(areaCode, {
+          Area_Code: areaCode,
+          Area_Name: areaName,
+          Cities: [],
+          Departments: [],
+          Zone_Code: zoneCode,
+          Zone_Name: zoneName,
+          CitySet: new Set<string>(),
+        });
+      }
+
+      const entry = grouped.get(areaCode);
+      if (!entry) continue;
+
+      const cityName = store.City_Name?.trim();
+      if (cityName && cityName.length > 0) {
+        entry.CitySet.add(cityName);
+      }
+
+      entry.Departments.push({
+        Department_Code: store.Department_Code,
+        Department_Name: store.Department_Name,
+        SQM: store.SQM ?? null,
+        Longitude: store.Longitude ?? null,
+        Latitude: store.Latitude ?? null,
+        Adresse: store.Adresse ?? null,
+        Format: store.Format ?? null,
+        City_Name: cityName ?? null,
+        Area_Code: areaCode,
+        Area_Name: areaName,
+        Zone_Code: zoneCode,
+        Zone_Name: zoneName,
+        Region_Code: store.Region_Code ?? null,
+        Region_Name: store.Region_Name ?? null,
+      });
+    }
+
+    return Array.from(grouped.values())
+      .map(({ CitySet, ...area }) => ({
+        ...area,
+        Cities: Array.from(CitySet).sort((a, b) => a.localeCompare(b)),
+        Departments: area.Departments.sort((a, b) =>
+          a.Department_Name.localeCompare(b.Department_Name)
+        ),
+      }))
+      .sort((a, b) => a.Area_Name.localeCompare(b.Area_Name));
+  }, [stores]);
+
+  const zoneList = useMemo<Zone[]>(() => {
+    const grouped = new Map<string, Zone & { AreaSet: Set<string>; CitySet: Set<string> }>();
+
+    for (const store of stores) {
+      const zoneName = store.Zone_Name ?? "Unassigned Region";
+      const zoneCode =
+        store.Zone_Code != null && store.Zone_Code !== ""
+          ? String(store.Zone_Code)
+          : `zone-${slugify(zoneName)}`;
+
+      if (!grouped.has(zoneCode)) {
+        grouped.set(zoneCode, {
+          Zone_Code: zoneCode,
+          Zone_Name: zoneName,
+          Areas: [],
+          Cities: [],
+          Departments: [],
+          AreaSet: new Set<string>(),
+          CitySet: new Set<string>(),
+        });
+      }
+
+      const entry = grouped.get(zoneCode);
+      if (!entry) continue;
+
+      const areaName = store.Area_Name ?? "Unassigned Area";
+      entry.AreaSet.add(areaName);
+
+      const cityName = store.City_Name?.trim();
+      if (cityName && cityName.length > 0) {
+        entry.CitySet.add(cityName);
+      }
+
+      entry.Departments.push({
+        Department_Code: store.Department_Code,
+        Department_Name: store.Department_Name,
+        SQM: store.SQM ?? null,
+        Longitude: store.Longitude ?? null,
+        Latitude: store.Latitude ?? null,
+        Adresse: store.Adresse ?? null,
+        Format: store.Format ?? null,
+        City_Name: cityName ?? null,
+        Area_Code: store.Area_Code ?? null,
+        Area_Name: areaName,
+        Zone_Code: zoneCode,
+        Zone_Name: zoneName,
+        Region_Code: store.Region_Code ?? null,
+        Region_Name: store.Region_Name ?? null,
+      });
+    }
+
+    return Array.from(grouped.values())
+      .map(({ AreaSet, CitySet, ...zone }) => ({
+        ...zone,
+        Areas: Array.from(AreaSet).sort((a, b) => a.localeCompare(b)),
+        Cities: Array.from(CitySet).sort((a, b) => a.localeCompare(b)),
+        Departments: zone.Departments.sort((a, b) =>
+          a.Department_Name.localeCompare(b.Department_Name)
+        ),
+      }))
+      .sort((a, b) => a.Zone_Name.localeCompare(b.Zone_Name));
+  }, [stores]);
 
   const handleFilterModeChange = (
     _event: React.MouseEvent<HTMLElement>,
@@ -423,7 +620,7 @@ export default function App() {
                   {filterMode === "city" ? (
                     <LocationCity />
                   ) : filterMode === "area" ? (
-                    <Map />
+                    <MapIcon />
                   ) : (
                     <Layers />
                   )}
@@ -513,6 +710,7 @@ export default function App() {
                   <MapView
                     selection={mapSelection}
                     cities={cityList}
+                    stores={stores}
                   />
                 }
               />
