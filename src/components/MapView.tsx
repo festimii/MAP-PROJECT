@@ -9,16 +9,19 @@ import type {
 
 export type MapSelection =
   | { mode: "city"; city: string }
-  | { mode: "area"; area: string; cities: string[] };
+  | { mode: "area"; area: string; cities: string[] }
+  | { mode: "zone"; zone: string; cities: string[]; areas: string[] };
 
 type StoreData = {
   Area_Code: string;
   Area_Name: string;
+  Zone_Code?: string | null;
+  Zone_Name?: string | null;
   Department_Code: string;
   Department_Name: string;
-  SQM: number;
-  Longitude: number;
-  Latitude: number;
+  SQM: number | null;
+  Longitude: number | null;
+  Latitude: number | null;
   Adresse: string | null;
   Format: string | null;
   City_Name?: string;
@@ -42,9 +45,12 @@ type StoreFeatureProperties = {
   city: string;
   cityNormalized: string;
   area: string;
+  areaNormalized: string;
   address: string | null;
   format: string | null;
   sqm: number;
+  zone: string;
+  zoneNormalized: string;
 };
 
 type BusinessProperties = {
@@ -134,28 +140,64 @@ export default function MapView({ selection, cities }: MapViewProps) {
     }
 
     const selectionValue = selectionRef.current;
-    const selectedNames = selectionValue
-      ? selectionValue.mode === "city"
-        ? [selectionValue.city]
-        : selectionValue.cities
-      : [];
+    let selectedCityNames: string[] = [];
+
+    let storeHighlightFilter: FilterSpecification = [
+      "all",
+      ["!has", "point_count"],
+      ["==", "cityNormalized", "__none__"],
+    ] as unknown as FilterSpecification;
+
+    if (selectionValue) {
+      switch (selectionValue.mode) {
+        case "city": {
+          selectedCityNames = [selectionValue.city];
+          storeHighlightFilter = [
+            "all",
+            ["!has", "point_count"],
+            ["==", "cityNormalized", normalizeName(selectionValue.city)],
+          ] as unknown as FilterSpecification;
+          break;
+        }
+        case "area": {
+          selectedCityNames = selectionValue.cities;
+          storeHighlightFilter = [
+            "all",
+            ["!has", "point_count"],
+            ["==", "areaNormalized", normalizeName(selectionValue.area)],
+          ] as unknown as FilterSpecification;
+          break;
+        }
+        case "zone": {
+          selectedCityNames = selectionValue.cities;
+          storeHighlightFilter = [
+            "all",
+            ["!has", "point_count"],
+            ["==", "zoneNormalized", normalizeName(selectionValue.zone)],
+          ] as unknown as FilterSpecification;
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
     const cleanedNames = Array.from(
       new Set(
-        selectedNames
+        selectedCityNames
           .map((name) => name.trim())
           .filter((name) => name.length > 0)
       )
     );
-    const normalizedNames = cleanedNames.map(normalizeName);
-    const hasSelection = cleanedNames.length > 0;
+    const hasCitySelection = cleanedNames.length > 0;
 
-    const highlightFilter: FilterSpecification = hasSelection
+    const highlightFilter: FilterSpecification = hasCitySelection
       ? (["in", nameKey, ...cleanedNames] as unknown as FilterSpecification)
       : (["in", nameKey, ""] as unknown as FilterSpecification);
 
     map.setFilter("city-highlight", highlightFilter);
 
-    if (hasSelection) {
+    if (hasCitySelection) {
       map.setPaintProperty("city-boundaries", "fill-color", [
         "case",
         ["in", ["get", nameKey], ["literal", cleanedNames]],
@@ -174,26 +216,14 @@ export default function MapView({ selection, cities }: MapViewProps) {
     }
 
     const highlightLayerExists = Boolean(map.getLayer("store-points-highlight"));
-    const highlightFilterExpression: FilterSpecification = hasSelection
-      ? ([
-          "all",
-          ["!has", "point_count"],
-          ["in", "cityNormalized", ...normalizedNames],
-        ] as unknown as FilterSpecification)
-      : ([
-          "all",
-          ["!has", "point_count"],
-          ["==", "cityNormalized", "__none__"],
-        ] as unknown as FilterSpecification);
-
     if (highlightLayerExists) {
-      map.setFilter("store-points-highlight", highlightFilterExpression);
+      map.setFilter("store-points-highlight", storeHighlightFilter);
     }
 
     if (map.getLayer("store-labels")) {
-      map.setFilter("store-labels", highlightFilterExpression);
+      map.setFilter("store-labels", storeHighlightFilter);
       const zoom = map.getZoom();
-      const shouldShowLabels = hasSelection && zoom >= 11;
+      const shouldShowLabels = Boolean(selectionValue) && zoom >= 11;
       map.setLayoutProperty(
         "store-labels",
         "visibility",
@@ -201,7 +231,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
       );
     }
 
-    if (hasSelection && geojson) {
+    if (selectionValue && hasCitySelection && geojson) {
       const matchingFeatures = geojson.features.filter((feature) => {
         const value = feature.properties?.[nameKey];
         return typeof value === "string" && cleanedNames.includes(value.trim());
@@ -254,7 +284,9 @@ export default function MapView({ selection, cities }: MapViewProps) {
         );
         previousSelectionHadValue.current = true;
       }
-    } else if (!hasSelection && previousSelectionHadValue.current) {
+    } else if (selectionValue && !hasCitySelection) {
+      previousSelectionHadValue.current = true;
+    } else if (!selectionValue && previousSelectionHadValue.current) {
       map.easeTo({
         center: [21, 42.6],
         zoom: 7.5,
@@ -396,25 +428,31 @@ export default function MapView({ selection, cities }: MapViewProps) {
             const stores: StoreData[] = await storesRes.json();
             setStoresData(stores);
             const features: GeoJSON.Feature[] = stores
-              .filter((d) => d.Longitude && d.Latitude)
-              .map((d) => ({
-                type: "Feature",
-                geometry: {
-                  type: "Point",
-                  coordinates: [d.Longitude, d.Latitude],
-                },
-                properties: {
-                  department: d.Department_Name,
-                  city: d.City_Name ?? d.Area_Name.replace(/ Area$/i, ""),
-                  cityNormalized: normalizeName(
-                    d.City_Name ?? d.Area_Name.replace(/ Area$/i, "")
-                  ),
-                  area: d.Area_Name,
-                  address: d.Adresse ?? null,
-                  format: d.Format ?? null,
-                  sqm: d.SQM,
-                } satisfies StoreFeatureProperties,
-              }));
+              .filter((d) => d.Longitude !== null && d.Latitude !== null)
+              .map((d) => {
+                const fallbackCity = d.City_Name ?? d.Area_Name.replace(/ Area$/i, "");
+                const zoneName = d.Zone_Name ?? "Unassigned Zone";
+
+                return {
+                  type: "Feature",
+                  geometry: {
+                    type: "Point",
+                    coordinates: [d.Longitude as number, d.Latitude as number],
+                  },
+                  properties: {
+                    department: d.Department_Name,
+                    city: fallbackCity,
+                    cityNormalized: normalizeName(fallbackCity),
+                    area: d.Area_Name,
+                    areaNormalized: normalizeName(d.Area_Name),
+                    address: d.Adresse ?? null,
+                    format: d.Format ?? null,
+                    sqm: d.SQM ?? 0,
+                    zone: zoneName,
+                    zoneNormalized: normalizeName(zoneName),
+                  } satisfies StoreFeatureProperties,
+                };
+              });
 
             map.addSource("stores", {
               type: "geojson",
@@ -829,19 +867,49 @@ export default function MapView({ selection, cities }: MapViewProps) {
       return null;
     }
 
-    const targetNames =
-      selection.mode === "city" ? [selection.city] : selection.cities;
-    const normalizedTargets = new Set(
-      targetNames.map((name) => normalizeName(name))
-    );
-    const matchingStores = storesData.filter((store) => {
-      const candidateName = normalizeName(
-        store.City_Name ?? store.Area_Name.replace(/ Area$/i, "")
-      );
-      return normalizedTargets.has(candidateName);
-    });
+    let matchingStores: StoreData[] = [];
+    let label = "";
+    let focusLabel = "City focus";
+    let cityNames: string[] = [];
+    let areaNames: string[] = [];
 
-    const totalSQM = matchingStores.reduce((sum, store) => sum + store.SQM, 0);
+    if (selection.mode === "city") {
+      label = selection.city;
+      focusLabel = "City focus";
+      cityNames = [selection.city];
+      const normalizedTarget = normalizeName(selection.city);
+      matchingStores = storesData.filter((store) => {
+        const candidateName = normalizeName(
+          store.City_Name ?? store.Area_Name.replace(/ Area$/i, "")
+        );
+        return candidateName === normalizedTarget;
+      });
+    } else if (selection.mode === "area") {
+      label = selection.area;
+      focusLabel = "Area focus";
+      cityNames = selection.cities;
+      areaNames = [selection.area];
+      const normalizedTarget = normalizeName(selection.area);
+      matchingStores = storesData.filter((store) => {
+        const areaName = store.Area_Name ? normalizeName(store.Area_Name) : "";
+        return areaName === normalizedTarget;
+      });
+    } else {
+      label = selection.zone;
+      focusLabel = "Zone focus";
+      cityNames = selection.cities;
+      areaNames = selection.areas;
+      const normalizedTarget = normalizeName(selection.zone);
+      matchingStores = storesData.filter((store) => {
+        const zoneName = normalizeName(store.Zone_Name ?? "Unassigned Zone");
+        return zoneName === normalizedTarget;
+      });
+    }
+
+    const totalSQM = matchingStores.reduce(
+      (sum, store) => sum + (store.SQM ?? 0),
+      0
+    );
     const formats = new Map<string, number>();
     for (const store of matchingStores) {
       const key = (store.Format ?? "Unspecified").trim() || "Unspecified";
@@ -855,9 +923,10 @@ export default function MapView({ selection, cities }: MapViewProps) {
 
     return {
       mode: selection.mode,
-      label: selection.mode === "city" ? selection.city : selection.area,
-      cities:
-        selection.mode === "city" ? [selection.city] : selection.cities,
+      focusLabel,
+      label,
+      cities: cityNames,
+      areas: areaNames,
       stores: matchingStores,
       storeCount: matchingStores.length,
       totalSQM,
@@ -914,7 +983,7 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 color: "rgba(148, 163, 184, 0.85)",
               }}
             >
-              {selectionSummary.mode === "area" ? "Area focus" : "City focus"}
+              {selectionSummary.focusLabel}
             </span>
             <h3
               style={{
@@ -952,6 +1021,48 @@ export default function MapView({ selection, cities }: MapViewProps) {
                 </span>
               ))}
             </div>
+            {selectionSummary.mode === "zone" &&
+              selectionSummary.areas.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 11,
+                      color: "rgba(148, 163, 184, 0.75)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    Areas
+                  </p>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                    }}
+                  >
+                    {selectionSummary.areas.map((area) => (
+                      <span
+                        key={area}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "2px 8px",
+                          borderRadius: 9999,
+                          fontSize: 11,
+                          background: "rgba(59, 130, 246, 0.12)",
+                          color: "rgba(191, 219, 254, 0.9)",
+                          border: "1px solid rgba(59, 130, 246, 0.28)",
+                        }}
+                      >
+                        {area}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
           </div>
           <div
             style={{
@@ -1087,7 +1198,8 @@ export default function MapView({ selection, cities }: MapViewProps) {
                       color: "rgba(148, 163, 184, 0.75)",
                     }}
                   >
-                    {store.SQM.toLocaleString()} m² · {store.Area_Name}
+                    {(store.SQM ?? 0).toLocaleString()} m² · {store.Area_Name}
+                    {store.Zone_Name ? ` · ${store.Zone_Name}` : ""}
                   </p>
                 </div>
               ))
