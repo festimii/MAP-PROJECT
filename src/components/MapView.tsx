@@ -1415,265 +1415,363 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       <Box
         sx={{
           position: "absolute",
-          top: 16,
+          top: { xs: 12, sm: 16 },
           left: 16,
+          right: 16,
           zIndex: 3,
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+          gap: 2,
+          pointerEvents: "none",
         }}
       >
-        <Paper
-          elevation={6}
+        <Stack
+          spacing={2}
           sx={{
-            px: 2,
-            py: 1.5,
-            borderRadius: 3,
-            display: "flex",
-            flexDirection: "column",
-            gap: 1,
-            backgroundColor: "rgba(15, 23, 42, 0.88)",
-            border: "1px solid rgba(148, 163, 184, 0.3)",
-            color: "rgba(226, 232, 240, 0.92)",
-            backdropFilter: "blur(10px)",
-            minWidth: 200,
+            pointerEvents: "auto",
+            flex: { xs: "1 1 100%", sm: "0 0 auto" },
+            width: { xs: "100%", sm: 260 },
+            maxWidth: { xs: "100%", sm: 280 },
           }}
         >
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Typography variant="overline" sx={{ letterSpacing: 0.8 }}>
-              Map theme
-            </Typography>
-            <Tooltip
-              title={
-                darkMode
-                  ? "Switch to light basemap"
-                  : "Switch to dark basemap"
-              }
-            >
-              <IconButton
-                size="small"
-                aria-label="Toggle map theme"
-                onClick={() => setDarkMode(!darkMode)}
-                sx={{
-                  color: "primary.light",
-                  bgcolor: "rgba(59, 130, 246, 0.15)",
-                  "&:hover": { bgcolor: "rgba(59, 130, 246, 0.25)" },
-                }}
-              >
-                {darkMode ? (
-                  <LightMode fontSize="small" />
-                ) : (
-                  <DarkMode fontSize="small" />
-                )}
-              </IconButton>
-            </Tooltip>
-          </Stack>
-          <Typography
-            variant="caption"
-            sx={{ color: "rgba(203, 213, 225, 0.8)" }}
+          <Paper
+            elevation={6}
+            sx={{
+              px: 2,
+              py: 1.5,
+              borderRadius: 3,
+              display: "flex",
+              flexDirection: "column",
+              gap: 1,
+              backgroundColor: "rgba(15, 23, 42, 0.88)",
+              border: "1px solid rgba(148, 163, 184, 0.3)",
+              color: "rgba(226, 232, 240, 0.92)",
+              backdropFilter: "blur(10px)",
+            }}
           >
-            Toggle between light and dark context layers for the basemap.
-          </Typography>
-        </Paper>
-      </Box>
-  
-      {selectionSummary && (
-        <Paper
-          elevation={10}
-          sx={{
-            position: "absolute",
-            top: 16,
-            right: 16,
-            zIndex: 3,
-            width: { xs: "calc(100% - 32px)", sm: 320, md: 360 },
-            maxHeight: { xs: "calc(100% - 32px)", md: "calc(100% - 32px)" },
-            display: "flex",
-            flexDirection: "column",
-            borderRadius: 3,
-            backgroundColor: "rgba(15, 23, 42, 0.92)",
-            border: "1px solid rgba(148, 163, 184, 0.35)",
-            color: "rgba(226, 232, 240, 0.95)",
-            backdropFilter: "blur(10px)",
-            overflow: "hidden",
-          }}
-        >
-          <Box sx={{ p: 2.5, pb: 2 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
-              <Typography
-                variant="overline"
-                sx={{
-                  letterSpacing: 0.8,
-                  color: "rgba(148, 163, 184, 0.85)",
-                }}
-              >
-                {selectionSummary.focusLabel}
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Typography variant="overline" sx={{ letterSpacing: 0.8 }}>
+                Map theme
               </Typography>
-            </Stack>
-            <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
-              {selectionSummary.label}
-            </Typography>
-            {selectionSummary.mode === "city" && (
-              <Button
-                size="small"
-                variant="outlined"
-                color="info"
-                startIcon={<TravelExplore fontSize="small" />}
-                sx={{
-                  mt: 1.5,
-                  borderRadius: 9999,
-                  alignSelf: "flex-start",
-                }}
-                onClick={() =>
-                  navigate(`/report/${encodeURIComponent(selectionSummary.label)}`)
+              <Tooltip
+                title={
+                  darkMode
+                    ? "Switch to light basemap"
+                    : "Switch to dark basemap"
                 }
               >
-                Open layered report
-              </Button>
-            )}
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ mt: 1.5, flexWrap: "wrap" }}
-            >
-              {selectionSummary.cities.map((city) => (
-                <Chip
-                  key={city}
+                <IconButton
                   size="small"
-                  color="primary"
-                  variant="outlined"
-                  label={city}
-                />
-              ))}
-            </Stack>
-            {selectionSummary.mode === "zone" &&
-              selectionSummary.areas.length > 0 && (
-                <Box sx={{ mt: 1.5 }}>
-                  <Typography
-                    variant="overline"
-                    sx={{
-                      letterSpacing: 0.7,
-                      color: "rgba(148, 163, 184, 0.75)",
-                    }}
-                  >
-                    Areas
-                  </Typography>
-                  <Stack
-                    direction="row"
-                    spacing={1}
-                    sx={{ flexWrap: "wrap", mt: 0.5 }}
-                  >
-                    {selectionSummary.areas.map((area) => (
-                      <Chip
-                        key={area}
-                        size="small"
-                        variant="outlined"
-                        label={area}
-                        sx={{
-                          borderColor: "rgba(148, 163, 184, 0.4)",
-                          color: "rgba(226, 232, 240, 0.9)",
-                        }}
-                      />
-                    ))}
-                  </Stack>
-                </Box>
-              )}
-          </Box>
-          <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
-          <Box sx={{ p: 2, pt: 1.5 }}>
-            <Stack direction="row" spacing={1.25} sx={{ flexWrap: "wrap" }}>
-              {[
-                {
-                  label: "Stores",
-                  value: selectionSummary.storeCount.toLocaleString(),
-                },
-                {
-                  label: "Total SQM",
-                  value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
-                },
-                {
-                  label: "Geo coverage",
-                  value: `${geoCoveragePercent}%`,
-                  helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
-                },
-              ].map(({ label, value, helper }) => (
-                <Box
-                  key={label}
+                  aria-label="Toggle map theme"
+                  onClick={() => setDarkMode(!darkMode)}
                   sx={{
-                    flex: "1 1 120px",
-                    px: 1.5,
-                    py: 1.25,
-                    borderRadius: 2,
-                    border: "1px solid rgba(148, 163, 184, 0.25)",
-                    bgcolor: "rgba(30, 41, 59, 0.55)",
+                    color: "primary.light",
+                    bgcolor: "rgba(59, 130, 246, 0.15)",
+                    "&:hover": { bgcolor: "rgba(59, 130, 246, 0.25)" },
                   }}
                 >
-                  <Typography
-                    variant="caption"
-                    sx={{
-                      color: "rgba(191, 219, 254, 0.7)",
-                      letterSpacing: 0.6,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {label}
-                  </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                    {value}
-                  </Typography>
-                  {helper && (
-                    <Typography
-                      variant="caption"
-                      sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                    >
-                      {helper}
-                    </Typography>
+                  {darkMode ? (
+                    <LightMode fontSize="small" />
+                  ) : (
+                    <DarkMode fontSize="small" />
                   )}
-                </Box>
-              ))}
+                </IconButton>
+              </Tooltip>
             </Stack>
-            {selectionCompetition && (
-              <Box sx={{ mt: 2 }}>
-                <Typography
-                  variant="subtitle2"
-                  sx={{ fontWeight: 600, color: "rgba(167, 243, 208, 0.95)" }}
-                >
-                  Nearby competition
-                </Typography>
-                <Typography
-                  variant="body2"
-                  sx={{ color: "rgba(226, 232, 240, 0.8)" }}
-                >
-                  {selectionCompetition.total > 0
-                    ? `${selectionCompetition.total.toLocaleString()} nearby location${
-                        selectionCompetition.total === 1 ? "" : "s"
-                      }`
-                    : "No competition data yet"}
-                </Typography>
-                {selectionCompetition.topCategories.length > 0 && (
-                  <Stack
-                    direction="row"
-                    spacing={1}
-                    sx={{ mt: 1, flexWrap: "wrap" }}
+            <Typography
+              variant="caption"
+              sx={{ color: "rgba(203, 213, 225, 0.8)" }}
+            >
+              Toggle between light and dark context layers for the basemap.
+            </Typography>
+          </Paper>
+
+          {businessCategories.length > 0 && (
+            <Paper
+              elevation={8}
+              sx={{
+                px: 2,
+                py: 1.75,
+                borderRadius: 3,
+                backgroundColor: "rgba(15, 23, 42, 0.86)",
+                border: "1px solid rgba(148, 163, 184, 0.3)",
+                color: "rgba(226, 232, 240, 0.95)",
+                backdropFilter: "blur(10px)",
+              }}
+            >
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                justifyContent="space-between"
+              >
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Tune sx={{ fontSize: 18, color: "primary.light" }} />
+                  <Typography
+                    variant="overline"
+                    sx={{ letterSpacing: 0.7, color: "rgba(148, 163, 184, 0.8)" }}
                   >
-                    {selectionCompetition.topCategories.map(
-                      ({ category, label, count }) => (
+                    Competition filter
+                  </Typography>
+                </Stack>
+                <Typography
+                  variant="caption"
+                  sx={{ color: "rgba(148, 163, 184, 0.8)" }}
+                >
+                  {visibleCompetitionCount.toLocaleString()} shown
+                </Typography>
+              </Stack>
+              <FormControl fullWidth size="small" sx={{ mt: 1.5 }}>
+                <InputLabel id="business-category-label">Category</InputLabel>
+                <Select
+                  labelId="business-category-label"
+                  id="business-category"
+                  value={selectedCategory}
+                  label="Category"
+                  onChange={handleCategoryChange}
+                >
+                  <MenuItem value={DEFAULT_COMPETITION_CATEGORY}>
+                    All categories
+                  </MenuItem>
+                  {businessCategories.map((category) => (
+                    <MenuItem key={category} value={category}>
+                      {humanizeCategory(category)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Typography
+                variant="caption"
+                sx={{
+                  mt: 1.5,
+                  display: "block",
+                  color: "rgba(226, 232, 240, 0.75)",
+                }}
+              >
+                {selectedCategory === DEFAULT_COMPETITION_CATEGORY
+                  ? "Showing all nearby businesses for this focus."
+                  : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
+              </Typography>
+              {visibleCompetitionCount === 0 && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    mt: 0.75,
+                    display: "block",
+                    color: "rgba(148, 163, 184, 0.7)",
+                  }}
+                >
+                  No mapped businesses for this filter yet.
+                </Typography>
+              )}
+            </Paper>
+          )}
+        </Stack>
+
+        {selectionSummary && (
+          <Paper
+            elevation={10}
+            sx={{
+              pointerEvents: "auto",
+              ml: { sm: "auto" },
+              flex: { xs: "1 1 100%", sm: "0 0 auto" },
+              width: { xs: "100%", sm: 320, md: 360 },
+              maxWidth: { xs: "100%", sm: 360 },
+              maxHeight: {
+                xs: "calc(100vh - 200px)",
+                md: "calc(100vh - 180px)",
+              },
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: 3,
+              backgroundColor: "rgba(15, 23, 42, 0.92)",
+              border: "1px solid rgba(148, 163, 184, 0.35)",
+              color: "rgba(226, 232, 240, 0.95)",
+              backdropFilter: "blur(10px)",
+              overflow: "hidden",
+            }}
+          >
+            <Box sx={{ p: 2.5, pb: 2 }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
+                <Typography
+                  variant="overline"
+                  sx={{
+                    letterSpacing: 0.8,
+                    color: "rgba(148, 163, 184, 0.85)",
+                  }}
+                >
+                  {selectionSummary.focusLabel}
+                </Typography>
+              </Stack>
+              <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
+                {selectionSummary.label}
+              </Typography>
+              {selectionSummary.mode === "city" && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="info"
+                  startIcon={<TravelExplore fontSize="small" />}
+                  sx={{
+                    mt: 1.5,
+                    borderRadius: 9999,
+                    alignSelf: "flex-start",
+                  }}
+                  onClick={() =>
+                    navigate(`/report/${encodeURIComponent(selectionSummary.label)}`)
+                  }
+                >
+                  Open layered report
+                </Button>
+              )}
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ mt: 1.5, flexWrap: "wrap" }}
+              >
+                {selectionSummary.cities.map((city) => (
+                  <Chip
+                    key={city}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    label={city}
+                  />
+                ))}
+              </Stack>
+              {selectionSummary.mode === "zone" &&
+                selectionSummary.areas.length > 0 && (
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography
+                      variant="overline"
+                      sx={{
+                        letterSpacing: 0.7,
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      Areas
+                    </Typography>
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      sx={{ flexWrap: "wrap", mt: 0.5 }}
+                    >
+                      {selectionSummary.areas.map((area) => (
                         <Chip
-                          key={category}
-                          label={`${label} (${count})`}
+                          key={area}
                           size="small"
-                          color="success"
                           variant="outlined"
+                          label={area}
                           sx={{
-                            bgcolor: "rgba(16, 185, 129, 0.14)",
-                            color: "rgba(167, 243, 208, 0.95)",
-                            borderColor: "rgba(16, 185, 129, 0.35)",
+                            borderColor: "rgba(148, 163, 184, 0.4)",
+                            color: "rgba(226, 232, 240, 0.9)",
                           }}
                         />
-                      )
-                    )}
-                  </Stack>
+                      ))}
+                    </Stack>
+                  </Box>
                 )}
-              </Box>
-            )}
-          </Box>
+            </Box>
+            <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
+            <Box sx={{ p: 2, pt: 1.5 }}>
+              <Stack direction="row" spacing={1.25} sx={{ flexWrap: "wrap" }}>
+                {[
+                  {
+                    label: "Stores",
+                    value: selectionSummary.storeCount.toLocaleString(),
+                  },
+                  {
+                    label: "Total SQM",
+                    value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
+                  },
+                  {
+                    label: "Geo coverage",
+                    value: `${geoCoveragePercent}%`,
+                    helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
+                  },
+                ].map(({ label, value, helper }) => (
+                  <Box
+                    key={label}
+                    sx={{
+                      flex: "1 1 120px",
+                      px: 1.5,
+                      py: 1.25,
+                      borderRadius: 2,
+                      border: "1px solid rgba(148, 163, 184, 0.25)",
+                      bgcolor: "rgba(30, 41, 59, 0.55)",
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: "rgba(191, 219, 254, 0.7)",
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {label}
+                    </Typography>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                      {value}
+                    </Typography>
+                    {helper && (
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                      >
+                        {helper}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Stack>
+              {selectionCompetition && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography
+                    variant="subtitle2"
+                    sx={{ fontWeight: 600, color: "rgba(167, 243, 208, 0.95)" }}
+                  >
+                    Nearby competition
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "rgba(226, 232, 240, 0.8)" }}
+                  >
+                    {selectionCompetition.total > 0
+                      ? `${selectionCompetition.total.toLocaleString()} nearby location${
+                          selectionCompetition.total === 1 ? "" : "s"
+                        }`
+                      : "No competition data yet"}
+                  </Typography>
+                  {selectionCompetition.topCategories.length > 0 && (
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      sx={{ mt: 1, flexWrap: "wrap" }}
+                    >
+                      {selectionCompetition.topCategories.map(
+                        ({ category, label, count }) => (
+                          <Chip
+                            key={category}
+                            label={`${label} (${count})`}
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                            sx={{
+                              bgcolor: "rgba(16, 185, 129, 0.14)",
+                              color: "rgba(167, 243, 208, 0.95)",
+                              borderColor: "rgba(16, 185, 129, 0.35)",
+                            }}
+                          />
+                        )
+                      )}
+                    </Stack>
+                  )}
+                </Box>
+              )}
+            </Box>
           <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
           <Box sx={{ px: 2, py: 2, overflowY: "auto", maxHeight: 240 }}>
             {displayedStores.length === 0 ? (
@@ -1741,83 +1839,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           </Box>
         </Paper>
       )}
-  
-      {businessCategories.length > 0 && (
-        <Paper
-          elevation={8}
-          sx={{
-            position: "absolute",
-            top: selectionSummary ? 116 : 96,
-            left: 16,
-            zIndex: 3,
-            width: 260,
-            px: 2,
-            py: 1.75,
-            borderRadius: 3,
-            backgroundColor: "rgba(15, 23, 42, 0.86)",
-            border: "1px solid rgba(148, 163, 184, 0.3)",
-            color: "rgba(226, 232, 240, 0.95)",
-            backdropFilter: "blur(10px)",
-          }}
-        >
-          <Stack
-            direction="row"
-            spacing={1}
-            alignItems="center"
-            justifyContent="space-between"
-          >
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Tune sx={{ fontSize: 18, color: "primary.light" }} />
-              <Typography
-                variant="overline"
-                sx={{ letterSpacing: 0.7, color: "rgba(148, 163, 184, 0.8)" }}
-              >
-                Competition filter
-              </Typography>
-            </Stack>
-            <Typography
-              variant="caption"
-              sx={{ color: "rgba(148, 163, 184, 0.8)" }}
-            >
-              {visibleCompetitionCount.toLocaleString()} shown
-            </Typography>
-          </Stack>
-          <FormControl fullWidth size="small" sx={{ mt: 1.5 }}>
-            <InputLabel id="business-category-label">Category</InputLabel>
-            <Select
-              labelId="business-category-label"
-              id="business-category"
-              value={selectedCategory}
-              label="Category"
-              onChange={handleCategoryChange}
-            >
-              <MenuItem value={DEFAULT_COMPETITION_CATEGORY}>All categories</MenuItem>
-              {businessCategories.map((category) => (
-                <MenuItem key={category} value={category}>
-                  {humanizeCategory(category)}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Typography
-            variant="caption"
-            sx={{ mt: 1.5, display: "block", color: "rgba(226, 232, 240, 0.75)" }}
-          >
-            {selectedCategory === DEFAULT_COMPETITION_CATEGORY
-              ? "Showing all nearby businesses for this focus."
-              : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
-          </Typography>
-          {visibleCompetitionCount === 0 && (
-            <Typography
-              variant="caption"
-              sx={{ mt: 0.75, display: "block", color: "rgba(148, 163, 184, 0.7)" }}
-            >
-              No mapped businesses for this filter yet.
-            </Typography>
-          )}
-        </Paper>
-      )}
-  
+      </Box>
+
       <Paper
         elevation={6}
         sx={{
