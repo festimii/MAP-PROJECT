@@ -4,6 +4,7 @@ import {
   Box,
   CssBaseline,
   Drawer,
+  Paper,
   Stack,
   ThemeProvider,
   Toolbar,
@@ -22,7 +23,7 @@ import { darkTheme } from "./theme/darkTheme";
 import { formatNumber } from "./utils/format";
 
 const drawerWidth = 300;
-const appBarHeight = { xs: 92, md: 104 } as const;
+const appBarHeight = { xs: 72, md: 80 } as const;
 
 const resolveMapSelection = (
   filterMode: FilterMode,
@@ -156,50 +157,46 @@ export default function App() {
             zIndex: (theme) => theme.zIndex.drawer + 1,
             ml: `${drawerWidth}px`,
             width: `calc(100% - ${drawerWidth}px)`,
-            background:
-              "linear-gradient(120deg, rgba(15,23,42,0.95) 0%, rgba(30,64,175,0.82) 60%, rgba(12,74,110,0.85) 100%)",
-            borderBottom: "1px solid rgba(148, 163, 184, 0.25)",
-            backdropFilter: "blur(10px)",
           }}
         >
           <Toolbar
             sx={{
               minHeight: appBarHeight,
-              px: { xs: 2, lg: 3 },
-              py: { xs: 1.5, md: 2 },
-              gap: 3,
+              px: { xs: 2.25, lg: 3 },
+              py: { xs: 1.25, md: 1.5 },
+              gap: { xs: 2, md: 2.5 },
               alignItems: { xs: "flex-start", md: "center" },
-              flexWrap: "wrap",
+              flexWrap: { xs: "wrap", md: "nowrap" },
             }}
           >
             <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
               <Box
                 sx={{
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   borderRadius: "14px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  bgcolor: "rgba(59, 130, 246, 0.18)",
+                  bgcolor: "rgba(59, 130, 246, 0.16)",
                   border: "1px solid rgba(59, 130, 246, 0.32)",
                   color: "primary.light",
-                  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.45)",
+                  boxShadow: "0 12px 28px rgba(8, 15, 30, 0.45)",
                 }}
               >
-                <MenuIcon sx={{ fontSize: 24 }} />
+                <MenuIcon sx={{ fontSize: 22 }} />
               </Box>
               <Box>
                 <Typography
                   variant="h6"
                   noWrap
-                  sx={{ fontWeight: "bold", letterSpacing: 0.5 }}
+                  sx={{ fontWeight: 700, letterSpacing: 0.4 }}
                 >
                   Viva Fresh — Demografia
                 </Typography>
                 <Typography
                   variant="body2"
-                  sx={{ color: "rgba(191, 219, 254, 0.9)", mt: 0.25 }}
+                  sx={{ color: "text.secondary", mt: 0.25 }}
                 >
                   Live network intelligence across Kosovo
                 </Typography>
@@ -217,16 +214,19 @@ export default function App() {
               }}
             >
               {headerStats.map(({ label, value, helper }) => (
-                <Box
+                <Paper
                   key={label}
                   sx={{
                     px: 2,
                     py: 1.25,
                     borderRadius: 2,
-                    border: "1px solid rgba(148, 163, 184, 0.25)",
-                    bgcolor: "rgba(15, 23, 42, 0.38)",
                     minWidth: 120,
-                    boxShadow: "0 14px 32px rgba(15, 23, 42, 0.35)",
+                    bgcolor: "rgba(15, 23, 42, 0.55)",
+                    border: "1px solid rgba(148, 163, 184, 0.2)",
+                    boxShadow: "0 16px 30px rgba(8, 15, 30, 0.35)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 0.5,
                   }}
                 >
                   <Typography
@@ -239,21 +239,18 @@ export default function App() {
                   >
                     {label}
                   </Typography>
-                  <Typography
-                    variant="subtitle1"
-                    sx={{ fontWeight: 600, color: "common.white" }}
-                  >
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                     {value}
                   </Typography>
                   {helper && (
                     <Typography
                       variant="caption"
-                      sx={{ color: "rgba(191, 219, 254, 0.6)" }}
+                      sx={{ color: "rgba(191, 219, 254, 0.75)" }}
                     >
                       {helper}
                     </Typography>
                   )}
-                </Box>
+                </Paper>
               ))}
             </Stack>
           </Toolbar>
@@ -267,10 +264,7 @@ export default function App() {
             "& .MuiDrawer-paper": {
               width: drawerWidth,
               boxSizing: "border-box",
-              background:
-                "linear-gradient(180deg, rgba(17, 24, 39, 0.94) 0%, rgba(17, 24, 39, 0.82) 42%, rgba(30, 41, 59, 0.88) 100%)",
-              borderRight: "1px solid rgba(148, 163, 184, 0.25)",
-              backdropFilter: "blur(8px)",
+              paddingTop: 0,
             },
           }}
         >
@@ -294,7 +288,7 @@ export default function App() {
             flexGrow: 1,
             bgcolor: "background.default",
             backgroundImage:
-              "radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.12), transparent 55%), radial-gradient(circle at 85% 10%, rgba(14, 116, 144, 0.12), transparent 45%)",
+              "radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.15), transparent 55%), radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.12), transparent 45%)",
             display: "flex",
             flexDirection: "column",
             height: "100vh",
