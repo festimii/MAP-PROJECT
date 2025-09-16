@@ -6,6 +6,7 @@ import citiesRoutes from "./routes/cities.js";
 import areasRoutes from "./routes/areas.js";
 import regionsRoutes from "./routes/regions.js";
 import filtersRoutes from "./routes/filters.js";
+import zonesRoutes from "./routes/zones.js";
 import osmRoutes from "./routes/osm.js";
 import combinedRoutes from "./routes/combined.js";
 
@@ -18,6 +19,7 @@ app.use("/api/cities", citiesRoutes);
 app.use("/api/areas", areasRoutes);
 app.use("/api/regions", regionsRoutes);
 app.use("/api/areas/filters", filtersRoutes);
+app.use("/api/zones", zonesRoutes);
 app.use("/api/osm", osmRoutes);
 app.use("/api/combined", combinedRoutes);
 

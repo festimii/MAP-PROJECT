@@ -3,11 +3,11 @@ import { getPool } from "../db.js";
 
 const router = Router();
 
-router.get("/", async (req, res) => {
+router.get("/", async (_req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
-      SELECT 
+      SELECT
         o.Area_Code,
         LTRIM(RIGHT(o.Area_Name, LEN(o.Area_Name) - CHARINDEX('-', o.Area_Name))) AS Area_Name,
         LTRIM(RTRIM(o.City_Name)) AS City_Name,
@@ -19,11 +19,13 @@ router.get("/", async (req, res) => {
         s.Adresse,
         s.Format
       FROM OrgUnitArea o
-      LEFT JOIN Storesqm s ON o.Department_Code = s.Department_Code
+      LEFT JOIN Storesqm s 
+        ON o.Department_Code = s.Department_Code
       WHERE o.Area_Name IS NOT NULL
-      ORDER BY o.Area_Code, o.Department_Name
+      ORDER BY o.Area_Code, o.Department_Name;
     `);
 
+    // ✅ Group by Area_Code
     const grouped = {};
     result.recordset.forEach((row) => {
       if (!grouped[row.Area_Code]) {
@@ -45,17 +47,22 @@ router.get("/", async (req, res) => {
         Latitude: row.Latitude,
         Adresse: row.Adresse,
         Format: row.Format,
+        City_Name: row.City_Name,
+        Area_Code: row.Area_Code,
+        Area_Name: row.Area_Name,
       });
     });
 
     const response = Object.values(grouped).map((area) => ({
-      ...area,
+      Area_Code: area.Area_Code,
+      Area_Name: area.Area_Name,
       Cities: Array.from(area.Cities),
+      Departments: area.Departments,
     }));
 
     res.json(response);
   } catch (err) {
-    console.error("❌ Error fetching filters:", err);
+    console.error("❌ Error fetching areas:", err);
     res.status(500).send("Database error");
   }
 });
