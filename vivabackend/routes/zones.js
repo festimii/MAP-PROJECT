@@ -3,15 +3,15 @@ import { getPool } from "../db.js";
 
 const router = Router();
 
-router.get("/", async (req, res) => {
+router.get("/", async (_req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`
       SELECT
-        o.Area_Code,
-        LTRIM(RIGHT(o.Area_Name, LEN(o.Area_Name) - CHARINDEX('-', o.Area_Name))) AS Area_Name,
         o.Zone_Code,
         LTRIM(RTRIM(o.Zone_Name)) AS Zone_Name,
+        o.Area_Code,
+        LTRIM(RIGHT(o.Area_Name, LEN(o.Area_Name) - CHARINDEX('-', o.Area_Name))) AS Area_Name,
         LTRIM(RTRIM(o.City_Name)) AS City_Name,
         o.Department_Code,
         o.Department_Name,
@@ -22,26 +22,34 @@ router.get("/", async (req, res) => {
         s.Format
       FROM OrgUnitArea o
       LEFT JOIN Storesqm s ON o.Department_Code = s.Department_Code
-      WHERE o.Area_Name IS NOT NULL
-      ORDER BY o.Area_Code, o.Department_Name
+      WHERE o.Zone_Name IS NOT NULL
+      ORDER BY o.Zone_Code, o.Department_Name;
     `);
 
     const grouped = {};
+
     result.recordset.forEach((row) => {
-      if (!grouped[row.Area_Code]) {
-        grouped[row.Area_Code] = {
-          Area_Code: row.Area_Code,
-          Area_Name: row.Area_Name,
+      const zoneName = row.Zone_Name || "Unassigned";
+      const zoneKey = row.Zone_Code || `ZONE_${zoneName.replace(/\s+/g, "_")}`;
+
+      if (!grouped[zoneKey]) {
+        grouped[zoneKey] = {
           Zone_Code: row.Zone_Code ?? null,
-          Zone_Name: row.Zone_Name ?? null,
+          Zone_Name: zoneName,
+          Areas: new Set(),
           Cities: new Set(),
           Departments: [],
         };
       }
 
-      if (row.City_Name) grouped[row.Area_Code].Cities.add(row.City_Name);
+      if (row.Area_Name) {
+        grouped[zoneKey].Areas.add(row.Area_Name);
+      }
+      if (row.City_Name) {
+        grouped[zoneKey].Cities.add(row.City_Name);
+      }
 
-      grouped[row.Area_Code].Departments.push({
+      grouped[zoneKey].Departments.push({
         Department_Code: row.Department_Code,
         Department_Name: row.Department_Name,
         SQM: row.SQM,
@@ -49,26 +57,25 @@ router.get("/", async (req, res) => {
         Latitude: row.Latitude,
         Adresse: row.Adresse,
         Format: row.Format,
-        City_Name: row.City_Name,
         Area_Code: row.Area_Code,
         Area_Name: row.Area_Name,
+        City_Name: row.City_Name,
         Zone_Code: row.Zone_Code ?? null,
-        Zone_Name: row.Zone_Name ?? null,
+        Zone_Name: zoneName,
       });
     });
 
-    const response = Object.values(grouped).map((area) => ({
-      Area_Code: area.Area_Code,
-      Area_Name: area.Area_Name,
-      Zone_Code: area.Zone_Code,
-      Zone_Name: area.Zone_Name,
-      Cities: Array.from(area.Cities),
-      Departments: area.Departments,
+    const response = Object.values(grouped).map((zone) => ({
+      Zone_Code: zone.Zone_Code,
+      Zone_Name: zone.Zone_Name,
+      Areas: Array.from(zone.Areas),
+      Cities: Array.from(zone.Cities),
+      Departments: zone.Departments,
     }));
 
     res.json(response);
   } catch (err) {
-    console.error("❌ Error fetching filters:", err);
+    console.error("❌ Error fetching zones:", err);
     res.status(500).send("Database error");
   }
 });

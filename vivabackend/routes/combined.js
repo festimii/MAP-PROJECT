@@ -66,9 +66,11 @@ router.get("/stores-with-businesses", async (req, res) => {
     const pool = await getPool();
 
     const result = await pool.request().query(`
-      SELECT DISTINCT 
+      SELECT DISTINCT
         o.Area_Code,
         LTRIM(RIGHT(o.Area_Name, LEN(o.Area_Name) - CHARINDEX('-', o.Area_Name))) AS Area_Name,
+        o.Zone_Code,
+        LTRIM(RTRIM(o.Zone_Name)) AS Zone_Name,
         o.Department_Code,
         o.Department_Name,
         o.City_Name,
