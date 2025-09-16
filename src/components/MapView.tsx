@@ -135,6 +135,11 @@ const buildStoreFeatureCollection = (
   };
 };
 
+const CLOSE_ZOOM_THRESHOLD = 14.5;
+
+const buildStoreBaseFilter = (): FilterSpecification =>
+  ["!has", "point_count"] as unknown as FilterSpecification;
+
 export default function MapView({ selection, cities, stores }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -144,10 +149,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     GeoJSON.Feature<GeoJSON.Point, BusinessProperties>[]
   >([]);
   const [businessCategories, setBusinessCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>(
-    "supermarket"
-  );
-  const selectedCategoryRef = useRef(selectedCategory);
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const selectedCategoryRef = useRef("all");
   const categorySelectionWasUserDriven = useRef(false);
   const cityGeoJSONRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const cityNameKeyRef = useRef<string | null>(null);
@@ -155,6 +158,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [storesData, setStoresData] = useState<StoreData[]>(stores ?? []);
   const initialStoresRef = useRef<StoreData[] | undefined>(stores);
   const previousSelectionHadValue = useRef(false);
+  const storeHighlightFilterRef = useRef<FilterSpecification>(
+    [
+      "all",
+      ["!has", "point_count"],
+      ["==", "cityNormalized", "__none__"],
+    ] as unknown as FilterSpecification
+  );
+  const closeZoomStateRef = useRef(false);
+  const [isCloseZoom, setIsCloseZoom] = useState(false);
 
   const filterBusinessFeaturesBySelection = useCallback(
     (
@@ -259,14 +271,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
       if (uniqueCategories.length === 0) {
         nextCategory = "all";
+      } else if (!hasCurrentCategory) {
+        nextCategory = "all";
       } else if (
-        !hasCurrentCategory ||
-        !categorySelectionWasUserDriven.current
+        !categorySelectionWasUserDriven.current &&
+        currentCategory !== "all"
       ) {
-        const preferredCategory = uniqueCategories.includes("supermarket")
-          ? "supermarket"
-          : uniqueCategories[0] ?? "all";
-        nextCategory = preferredCategory;
+        nextCategory = "all";
       }
 
       if (nextCategory !== currentCategory) {
@@ -296,8 +307,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         selectionValue
       );
 
+      const zoomLevel = map.getZoom();
+      const bypassCategory = zoomLevel >= CLOSE_ZOOM_THRESHOLD;
+
       const filtered =
-        category === "all"
+        bypassCategory || category === "all"
           ? relevantFeatures
           : relevantFeatures.filter(
               (feature) => feature.properties.category === category
@@ -337,11 +351,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       "all",
       ["!has", "point_count"],
       ["==", "cityNormalized", "__none__"],
-    ] as unknown as FilterSpecification;
-
-    const storeBaseFilter = [
-      "!has",
-      "point_count",
     ] as unknown as FilterSpecification;
 
     if (selectionValue) {
@@ -391,11 +400,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       ? (["in", nameKey, ...cleanedNames] as unknown as FilterSpecification)
       : (["in", nameKey, ""] as unknown as FilterSpecification);
 
+    storeHighlightFilterRef.current = storeHighlightFilter;
+
     const clusterVisibility = selectionValue ? "none" : "visible";
     const highlightVisibility = selectionValue ? "visible" : "none";
 
     if (map.getLayer("store-points")) {
-      map.setFilter("store-points", storeBaseFilter);
+      map.setFilter("store-points", buildStoreBaseFilter());
       map.setPaintProperty(
         "store-points",
         "circle-opacity",
@@ -462,9 +473,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
 
     if (map.getLayer("store-labels")) {
-      map.setFilter("store-labels", storeHighlightFilter);
-      const zoom = map.getZoom();
-      const shouldShowLabels = Boolean(selectionValue) && zoom >= 11;
+      const zoomLevel = map.getZoom();
+      const isCloseZoom = zoomLevel >= CLOSE_ZOOM_THRESHOLD;
+      const labelFilter = isCloseZoom
+        ? buildStoreBaseFilter()
+        : storeHighlightFilter;
+      map.setFilter("store-labels", labelFilter);
+      const shouldShowLabels =
+        isCloseZoom || (Boolean(selectionValue) && zoomLevel >= 11);
       map.setLayoutProperty(
         "store-labels",
         "visibility",
@@ -632,6 +648,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     categorySelectionWasUserDriven.current = false;
     setSelectedCategory("all");
     selectedCategoryRef.current = "all";
+    closeZoomStateRef.current = false;
+    setIsCloseZoom(false);
 
     const styleUrl = darkMode
       ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
@@ -890,21 +908,39 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
           map.on("zoom", () => {
             const zoomLevel = map.getZoom();
+            const isCloseZoom = zoomLevel >= CLOSE_ZOOM_THRESHOLD;
             const hasSelection = Boolean(selectionRef.current);
-            const shouldShowStoreLabels = hasSelection && zoomLevel >= 11;
+
             if (map.getLayer("store-labels")) {
+              const highlightFilter =
+                storeHighlightFilterRef.current ?? buildStoreBaseFilter();
+              const labelFilter = isCloseZoom
+                ? buildStoreBaseFilter()
+                : highlightFilter;
+              map.setFilter("store-labels", labelFilter);
+              const shouldShowStoreLabels =
+                isCloseZoom || (hasSelection && zoomLevel >= 11);
               map.setLayoutProperty(
                 "store-labels",
                 "visibility",
                 shouldShowStoreLabels ? "visible" : "none"
               );
             }
+
             if (map.getLayer("business-labels")) {
               map.setLayoutProperty(
                 "business-labels",
                 "visibility",
-                zoomLevel >= 12 ? "visible" : "none"
+                isCloseZoom || zoomLevel >= 12 ? "visible" : "none"
               );
+            }
+
+            if (closeZoomStateRef.current !== isCloseZoom) {
+              closeZoomStateRef.current = isCloseZoom;
+              if (isMounted) {
+                setIsCloseZoom(isCloseZoom);
+              }
+              updateBusinessSource(map, selectedCategoryRef.current);
             }
           });
 
@@ -1250,7 +1286,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       selection
     );
 
-    if (selectedCategory === "all") {
+    if (isCloseZoom || selectedCategory === "all") {
       return relevantBusinesses.length;
     }
 
@@ -1262,6 +1298,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     selectedCategory,
     filterBusinessFeaturesBySelection,
     businessCategories,
+    isCloseZoom,
   ]);
 
   const selectionSummary = useMemo(() => {
@@ -1858,7 +1895,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               color: "rgba(226, 232, 240, 0.75)",
             }}
           >
-            {selectedCategory === "all"
+            {isCloseZoom
+              ? "Zoomed to ~1 km — showing all nearby businesses."
+              : selectedCategory === "all"
               ? "Showing all nearby businesses for this focus."
               : `Focusing on ${humanizeCategory(selectedCategory)} venues.`}
           </p>
