@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getPool } from "../db.js";
+import { mergeSubZoneData, parseSubZoneGeoJSON } from "../utils/subzones.js";
 
 const router = Router();
 
@@ -21,6 +22,8 @@ router.get("/", async (_req, res) => {
         s.Latitude,
         s.Adresse,
         s.Format,
+        sz.SubZone_Name,
+        sz.GeoJSON AS SubZone_GeoJSON,
         b.OSM_Id AS Business_OSM_Id,
         b.Name AS Business_Name,
         b.Category AS Business_Category,
@@ -31,6 +34,8 @@ router.get("/", async (_req, res) => {
       FROM OrgUnitArea o
       LEFT JOIN Storesqm s
         ON o.Department_Code = s.Department_Code
+      LEFT JOIN SubZones sz
+        ON sz.Store_Department_Code = o.Department_Code
       LEFT JOIN StoreNearbyBusiness b
         ON b.Store_Department_Code = o.Department_Code
       WHERE o.Department_Name IS NOT NULL
@@ -69,6 +74,8 @@ router.get("/", async (_req, res) => {
             Latitude: row.Latitude,
             Adresse: row.Adresse,
             Format: row.Format,
+            SubZone_Name: row.SubZone_Name ?? null,
+            SubZone_GeoJSON: parseSubZoneGeoJSON(row.SubZone_GeoJSON),
             NearbyBusinesses: [],
           },
           businessIds: new Set(),
@@ -77,6 +84,8 @@ router.get("/", async (_req, res) => {
 
       const entry = storesMap.get(storeKey);
       const store = entry.data;
+
+      mergeSubZoneData(store, row.SubZone_Name, row.SubZone_GeoJSON);
 
       if (row.City_Code && !store.City_Code) {
         store.City_Code = row.City_Code;

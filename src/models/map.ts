@@ -16,4 +16,6 @@ export interface StoreData {
   Adresse: string | null;
   Format: string | null;
   City_Name?: string;
+  SubZone_Name?: string | null;
+  SubZone_GeoJSON?: GeoJSON.GeoJsonObject | null;
 }
