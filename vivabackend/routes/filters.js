@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getPool } from "../db.js";
+import { mergeSubZoneData, parseSubZoneGeoJSON } from "../utils/subzones.js";
 
 const router = Router();
 
@@ -17,10 +18,14 @@ router.get("/", async (_req, res) => {
         s.Longitude,
         s.Latitude,
         s.Adresse,
-        s.Format
+        s.Format,
+        sz.SubZone_Name,
+        sz.GeoJSON AS SubZone_GeoJSON
       FROM OrgUnitArea o
-      LEFT JOIN Storesqm s 
+      LEFT JOIN Storesqm s
         ON o.Department_Code = s.Department_Code
+      LEFT JOIN SubZones sz
+        ON sz.Store_Department_Code = o.Department_Code
       WHERE o.Area_Name IS NOT NULL
       ORDER BY o.Area_Code, o.Department_Name;
     `);
@@ -39,7 +44,7 @@ router.get("/", async (_req, res) => {
 
       if (row.City_Name) grouped[row.Area_Code].Cities.add(row.City_Name);
 
-      grouped[row.Area_Code].Departments.push({
+      const department = {
         Department_Code: row.Department_Code,
         Department_Name: row.Department_Name,
         SQM: row.SQM,
@@ -50,7 +55,12 @@ router.get("/", async (_req, res) => {
         City_Name: row.City_Name,
         Area_Code: row.Area_Code,
         Area_Name: row.Area_Name,
-      });
+        SubZone_Name: row.SubZone_Name ?? null,
+        SubZone_GeoJSON: parseSubZoneGeoJSON(row.SubZone_GeoJSON),
+      };
+
+      mergeSubZoneData(department, row.SubZone_Name, row.SubZone_GeoJSON);
+      grouped[row.Area_Code].Departments.push(department);
     });
 
     const response = Object.values(grouped).map((area) => ({

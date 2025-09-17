@@ -96,6 +96,8 @@ const buildZoneGroups = (zones: RawZoneRecord[]): ZoneGroup[] => {
       Zone_Name: zoneName,
       Region_Code: record.Region_Code,
       Region_Name: record.Region_Name,
+      SubZone_Name: record.SubZone_Name ?? null,
+      SubZone_GeoJSON: record.SubZone_GeoJSON ?? null,
     };
 
     group.departments.push(department);
@@ -193,6 +195,8 @@ const buildStoreDataset = (departments: Department[]): StoreData[] => {
       City_Name: department.City_Name ?? undefined,
       Zone_Code: department.Zone_Code ?? undefined,
       Zone_Name: department.Zone_Name ?? undefined,
+      SubZone_Name: department.SubZone_Name ?? null,
+      SubZone_GeoJSON: department.SubZone_GeoJSON ?? null,
     });
   }
 

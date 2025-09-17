@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getPool } from "../db.js";
+import { mergeSubZoneData, parseSubZoneGeoJSON } from "../utils/subzones.js";
 
 const router = Router();
 
@@ -22,9 +23,12 @@ router.get("/stores-with-businesses", async (_req, res) => {
         s.Longitude,
         s.Latitude,
         s.Adresse,
-        s.Format
+        s.Format,
+        sz.SubZone_Name,
+        sz.GeoJSON AS SubZone_GeoJSON
       FROM OrgUnitArea o
       LEFT JOIN Storesqm s ON o.Department_Code = s.Department_Code
+      LEFT JOIN SubZones sz ON sz.Store_Department_Code = o.Department_Code
       WHERE o.Area_Name IS NOT NULL
       ORDER BY o.Area_Code, o.Department_Code;
     `);
@@ -87,10 +91,15 @@ WHERE Store_Department_Code = @Store_Department_Code
 ORDER BY Category, Name;
         `);
 
-      enriched.push({
+      const record = {
         ...row,
+        SubZone_Name: row.SubZone_Name ?? null,
+        SubZone_GeoJSON: parseSubZoneGeoJSON(row.SubZone_GeoJSON),
         NearbyBusinesses: businesses.recordset || [],
-      });
+      };
+
+      mergeSubZoneData(record, row.SubZone_Name, row.SubZone_GeoJSON);
+      enriched.push(record);
     }
 
     res.json(enriched);
