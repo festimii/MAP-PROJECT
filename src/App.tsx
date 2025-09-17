@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AppBar,
   Box,
+  Button,
   CssBaseline,
   Drawer,
   Paper,
@@ -11,6 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Route, Routes } from "react-router-dom";
+import { Refresh } from "@mui/icons-material";
 
 import MapView from "./components/MapView";
 import ReportView from "./components/ReportView";
@@ -19,7 +21,7 @@ import { useVivaFreshNetwork } from "./hooks/useVivaFreshNetwork";
 import type { FilterMode, SidebarItem } from "./models/viva";
 import type { MapSelection } from "./models/map";
 import { darkTheme } from "./theme/darkTheme";
-import { formatNumber } from "./utils/format";
+import { formatDateTime, formatNumber } from "./utils/format";
 
 const drawerWidth = 280;
 const appBarHeight = { xs: 20, md: 25 } as const;
@@ -56,8 +58,17 @@ const resolveMapSelection = (
 export default function App() {
   const [filterMode, setFilterMode] = useState<FilterMode>("city");
   const [selectedItem, setSelectedItem] = useState<SidebarItem | null>(null);
-  const { cities, cityItems, areaItems, zoneItems, stores, loading, error } =
-    useVivaFreshNetwork();
+  const {
+    cities,
+    cityItems,
+    areaItems,
+    zoneItems,
+    stores,
+    loading,
+    error,
+    lastUpdated,
+    reload,
+  } = useVivaFreshNetwork();
 
   const networkSummary = useMemo(() => {
     const cityCount = cityItems.length;
@@ -179,6 +190,14 @@ export default function App() {
                 >
                   Live network intelligence across Kosovo
                 </Typography>
+                {lastUpdated && (
+                  <Typography
+                    variant="caption"
+                    sx={{ color: "text.secondary", display: "block", mt: 0.25 }}
+                  >
+                    Updated {formatDateTime(lastUpdated)}
+                  </Typography>
+                )}
               </Box>
             </Box>
 
@@ -192,6 +211,26 @@ export default function App() {
                 justifyContent: { xs: "flex-start", md: "flex-end" },
               }}
             >
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-end",
+                  gap: 1,
+                  flexWrap: "wrap",
+                  width: { xs: "100%", md: "auto" },
+                }}
+              >
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Refresh fontSize="small" />}
+                  onClick={reload}
+                  disabled={loading}
+                >
+                  {loading ? "Refreshing…" : "Refresh data"}
+                </Button>
+              </Box>
               {headerStats.map(({ label, value, helper }) => (
                 <Paper
                   key={label}

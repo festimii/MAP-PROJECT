@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -7,17 +8,26 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  IconButton,
+  InputAdornment,
   List,
   ListItemButton,
   ListItemIcon,
   ListItemText,
   Stack,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Toolbar,
   Typography,
 } from "@mui/material";
-import { Layers, LocationCity, Map as MapIcon } from "@mui/icons-material";
+import {
+  Clear,
+  Layers,
+  LocationCity,
+  Map as MapIcon,
+  Search,
+} from "@mui/icons-material";
 
 import type {
   FilterMode,
@@ -435,6 +445,39 @@ const ListView = ({
   error,
   listSummaryLabel,
 }: ListViewProps) => {
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  useEffect(() => {
+    setSearchQuery("");
+  }, [filterMode]);
+
+  const filteredItems = useMemo(() => {
+    if (!normalizedQuery) {
+      return items;
+    }
+
+    return items.filter((item) =>
+      item.name.toLowerCase().includes(normalizedQuery)
+    );
+  }, [items, normalizedQuery]);
+
+  const summaryText = useMemo(() => {
+    if (loading) {
+      return "";
+    }
+
+    if (!normalizedQuery) {
+      return listSummaryLabel;
+    }
+
+    return `${filteredItems.length} of ${items.length} match "${searchQuery}"`;
+  }, [filteredItems.length, items.length, listSummaryLabel, loading, normalizedQuery, searchQuery]);
+
+  const handleClearSearch = () => {
+    setSearchQuery("");
+  };
+
   return (
     <Box
       sx={{
@@ -469,12 +512,39 @@ const ListView = ({
           <ToggleButton value="area">Areas</ToggleButton>
           <ToggleButton value="zone">Zones</ToggleButton>
         </ToggleButtonGroup>
-        {!loading && (
+        <TextField
+          size="small"
+          placeholder="Search by name"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          disabled={loading}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search fontSize="small" />
+              </InputAdornment>
+            ),
+            endAdornment:
+              searchQuery.length > 0 ? (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="Clear search"
+                    edge="end"
+                    size="small"
+                    onClick={handleClearSearch}
+                  >
+                    <Clear fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+          }}
+        />
+        {!loading && summaryText && (
           <Typography
             variant="caption"
             sx={{ color: "text.secondary", display: "block" }}
           >
-            {listSummaryLabel}
+            {summaryText}
           </Typography>
         )}
       </Box>
@@ -515,7 +585,7 @@ const ListView = ({
               Refresh the page once the API is back online.
             </Typography>
           </Box>
-        ) : items.length === 0 ? (
+        ) : filteredItems.length === 0 ? (
           <Box
             sx={{
               display: "flex",
@@ -525,12 +595,14 @@ const ListView = ({
             }}
           >
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              No results available yet.
+              {normalizedQuery
+                ? "No matches for your search."
+                : "No results available yet."}
             </Typography>
           </Box>
         ) : (
           <List disablePadding>
-            {items.map((item) => {
+            {filteredItems.map((item) => {
               const isSelected = selectedItem?.code === item.code;
               const icon =
                 item.type === "city" ? (
