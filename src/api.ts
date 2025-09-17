@@ -1,10 +1,8 @@
 import axios from "axios";
 
-import { API_BASE_URL } from "./config/apiConfig";
-
 // Base URL for backend API
 const API = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: "http://localhost:4000/api", // change to http://192.168.100.63:4000 for LAN
   timeout: 5000,
 });
 
