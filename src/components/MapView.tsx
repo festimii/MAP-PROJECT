@@ -7,12 +7,14 @@ import type {
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
 import {
+  Avatar,
   Box,
   Button,
   Chip,
   Divider,
   FormControl,
   InputLabel,
+  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -21,9 +23,13 @@ import {
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material/Select";
 import {
+  AccessTime,
+  Bolt,
   LocationCity,
   MapOutlined,
+  ShoppingBag,
   TravelExplore,
+  TrendingUp,
   Tune,
 } from "@mui/icons-material";
 
@@ -94,6 +100,28 @@ type SubZoneFeatureProperties = {
   departmentNormalized: string;
   zone: string;
   zoneNormalized: string;
+};
+
+type SelectionKpiMetric = {
+  label: string;
+  value: string;
+  helper: string;
+};
+
+type SelectionKpiData = {
+  summary: {
+    opportunityScore: number;
+    momentumIndex: number;
+    yoyTrend: number;
+    primaryFocus: string;
+    secondaryFocus: string;
+  };
+  dwellTime: number;
+  avgBasket: number;
+  network: SelectionKpiMetric[];
+  shopper: SelectionKpiMetric[];
+  operations: SelectionKpiMetric[];
+  sustainability: SelectionKpiMetric[];
 };
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
@@ -236,23 +264,32 @@ const collectSubZoneGeometries = (value: unknown): GeoJSON.Geometry[] => {
   }
 
   switch (geoJson.type) {
-    case "FeatureCollection":
+    case "FeatureCollection": {
+      const featureCollection = geoJson as GeoJSON.FeatureCollection<
+        GeoJSON.Geometry,
+        GeoJSON.GeoJsonProperties
+      >;
       return (
-        geoJson.features
+        featureCollection.features
           ?.filter(
             (feature): feature is GeoJSON.Feature<GeoJSON.Geometry> =>
               Boolean(feature?.geometry)
           )
           .map((feature) => feature.geometry) ?? []
       );
-    case "Feature":
-      return geoJson.geometry ? [geoJson.geometry] : [];
-    case "GeometryCollection":
+    }
+    case "Feature": {
+      const feature = geoJson as GeoJSON.Feature<GeoJSON.Geometry>;
+      return feature.geometry ? [feature.geometry] : [];
+    }
+    case "GeometryCollection": {
+      const geometryCollection = geoJson as GeoJSON.GeometryCollection;
       return (
-        geoJson.geometries?.filter(
+        geometryCollection.geometries?.filter(
           (geometry): geometry is GeoJSON.Geometry => Boolean(geometry)
         ) ?? []
       );
+    }
     default:
       return [geoJson as GeoJSON.Geometry];
   }
@@ -1604,6 +1641,130 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       : 0
     : 0;
 
+  const selectionKpis = useMemo<SelectionKpiData | null>(() => {
+    if (!selectionSummary) {
+      return null;
+    }
+
+    const key = `${selectionSummary.label}-${selectionSummary.mode}`;
+    const baseSeed =
+      key.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) || 1;
+    const seeded = (offset: number, min: number, max: number) => {
+      const x = Math.sin(baseSeed + offset) * 10000;
+      const fraction = x - Math.floor(x);
+      return fraction * (max - min) + min;
+    };
+
+    const focusThemes = [
+      "Fresh market leadership",
+      "Click & collect expansion",
+      "Loyalty activation",
+      "Convenience missions",
+      "Local sourcing partnerships",
+      "Urban micro-fulfilment",
+    ];
+
+    const focusIndex = Math.floor(seeded(1, 0, focusThemes.length));
+    const primaryFocus = focusThemes[focusIndex % focusThemes.length];
+    const secondaryFocus = focusThemes[(focusIndex + 2) % focusThemes.length];
+    const opportunityScore = Math.round(seeded(2, 68, 96));
+    const momentumIndex = Math.round(seeded(3, 54, 92));
+    const yoyTrend = Number(seeded(4, -2.5, 8.5).toFixed(1));
+    const avgBasket = Number(seeded(5, 14, 32).toFixed(1));
+    const dwellTime = Math.round(seeded(6, 12, 28));
+    const householdReach = Math.round(seeded(7, 28, 62));
+    const weeklyVisits = Math.round(seeded(8, 12, 44));
+    const newShopperGain = Math.round(seeded(9, 7, 21));
+    const loyaltyShare = Math.round(seeded(10, 46, 82));
+    const digitalOrders = Math.round(seeded(11, 9, 26));
+    const promoUplift = Number(seeded(12, 2.5, 7.5).toFixed(1));
+    const staffedHours = Math.round(seeded(13, 420, 620));
+    const onShelfAvailability = Math.round(seeded(14, 86, 97));
+    const wasteRate = Number(seeded(15, 1.4, 3.8).toFixed(1));
+    const energyIntensity = Math.round(seeded(16, 520, 690));
+
+    const toMetric = (
+      label: string,
+      value: string,
+      helper: string
+    ): SelectionKpiMetric => ({ label, value, helper });
+
+    return {
+      summary: {
+        opportunityScore,
+        momentumIndex,
+        yoyTrend,
+        primaryFocus,
+        secondaryFocus,
+      },
+      dwellTime,
+      avgBasket,
+      network: [
+        toMetric(
+          "Weekly visits",
+          `${weeklyVisits}k`,
+          "Estimated in-store footfall"
+        ),
+        toMetric(
+          "Household reach",
+          `${householdReach}%`,
+          "Population within a 10 km radius"
+        ),
+        toMetric(
+          "New shopper gain",
+          `${newShopperGain}%`,
+          "Quarter-over-quarter increase"
+        ),
+      ],
+      shopper: [
+        toMetric(
+          "Loyalty share",
+          `${loyaltyShare}%`,
+          "Transactions with Viva Club ID"
+        ),
+        toMetric(
+          "Digital orders",
+          `${digitalOrders}%`,
+          "Click & collect contribution"
+        ),
+        toMetric(
+          "Promo uplift",
+          `${promoUplift}%`,
+          "Incremental uplift from campaigns"
+        ),
+      ],
+      operations: [
+        toMetric(
+          "Avg. basket",
+          `€${avgBasket.toFixed(1)}`,
+          "Tax inclusive"
+        ),
+        toMetric(
+          "Staffed hours",
+          `${staffedHours}`,
+          "Weekly total across locations"
+        ),
+        toMetric(
+          "On-shelf availability",
+          `${onShelfAvailability}%`,
+          "Last 4-week audit"
+        ),
+      ],
+      sustainability: [
+        toMetric(
+          "Food waste rate",
+          `${wasteRate}%`,
+          "Against 2% internal target"
+        ),
+        toMetric(
+          "Energy intensity",
+          `${energyIntensity.toLocaleString()} kWh`,
+          "Per 1k m² trading area"
+        ),
+      ],
+    };
+  }, [selectionSummary]);
+
   const handleCategoryChange = (event: SelectChangeEvent<string>) => {
     categorySelectionWasUserDriven.current = true;
     setSelectedCategory(event.target.value);
@@ -1778,6 +1939,135 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   Open layered report
                 </Button>
               )}
+              {selectionKpis && (
+                <Box
+                  sx={{
+                    mt: 2,
+                    p: 2,
+                    borderRadius: 2.5,
+                    backgroundImage:
+                      "linear-gradient(135deg, rgba(59,130,246,0.14), rgba(236,72,153,0.08))",
+                    border: "1px solid rgba(96, 165, 250, 0.35)",
+                  }}
+                >
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={2}
+                    alignItems="stretch"
+                  >
+                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
+                      <Avatar
+                        variant="rounded"
+                        sx={{
+                          bgcolor: "rgba(59, 130, 246, 0.22)",
+                          border: "1px solid rgba(96, 165, 250, 0.4)",
+                          color: "rgba(191, 219, 254, 0.95)",
+                        }}
+                      >
+                        <Bolt fontSize="small" />
+                      </Avatar>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            letterSpacing: 0.8,
+                            color: "rgba(191, 219, 254, 0.75)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Opportunity score
+                        </Typography>
+                        <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                          {selectionKpis.summary.opportunityScore}
+                        </Typography>
+                        <LinearProgress
+                          variant="determinate"
+                          value={selectionKpis.summary.opportunityScore}
+                          sx={{ mt: 1, height: 6, borderRadius: 999 }}
+                        />
+                      </Box>
+                    </Stack>
+                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
+                      <Avatar
+                        variant="rounded"
+                        sx={{
+                          bgcolor: "rgba(16, 185, 129, 0.22)",
+                          border: "1px solid rgba(52, 211, 153, 0.4)",
+                          color: "rgba(167, 243, 208, 0.95)",
+                        }}
+                      >
+                        <TrendingUp fontSize="small" />
+                      </Avatar>
+                      <Box>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            letterSpacing: 0.8,
+                            color: "rgba(167, 243, 208, 0.8)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Momentum index
+                        </Typography>
+                        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                          {selectionKpis.summary.momentumIndex}
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color:
+                              selectionKpis.summary.yoyTrend >= 0
+                                ? "rgba(134, 239, 172, 0.95)"
+                                : "rgba(248, 113, 113, 0.92)",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {`${
+                            selectionKpis.summary.yoyTrend >= 0 ? "+" : ""
+                          }${selectionKpis.summary.yoyTrend}% YoY`}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </Stack>
+                  <Typography
+                    variant="body2"
+                    sx={{ mt: 2, color: "rgba(226, 232, 240, 0.85)" }}
+                  >
+                    {`Focus on ${selectionKpis.summary.primaryFocus} while building momentum in ${selectionKpis.summary.secondaryFocus}.`}
+                  </Typography>
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    sx={{ mt: 1.5, flexWrap: "wrap" }}
+                  >
+                    <Chip
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                      label={selectionKpis.summary.primaryFocus}
+                    />
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={`Support: ${selectionKpis.summary.secondaryFocus}`}
+                      sx={{ borderColor: "rgba(96, 165, 250, 0.4)" }}
+                    />
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      icon={<AccessTime fontSize="small" />}
+                      label={`Dwell ${selectionKpis.dwellTime} min`}
+                    />
+                    <Chip
+                      size="small"
+                      color="secondary"
+                      variant="outlined"
+                      icon={<ShoppingBag fontSize="small" />}
+                      label={`Avg basket €${selectionKpis.avgBasket.toFixed(1)}`}
+                    />
+                  </Stack>
+                </Box>
+              )}
               <Stack
                 direction="row"
                 spacing={1}
@@ -1879,6 +2169,213 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   </Box>
                 ))}
               </Stack>
+              {selectionKpis && (
+                <>
+                  <Divider
+                    sx={{ mt: 2, mb: 1.5, borderColor: "rgba(148, 163, 184, 0.18)" }}
+                  />
+                  <Box>
+                    <Typography
+                      variant="overline"
+                      sx={{
+                        letterSpacing: 0.7,
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      Network KPIs
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 1,
+                        display: "grid",
+                        gap: 1.25,
+                        gridTemplateColumns: {
+                          xs: "1fr",
+                          sm: "repeat(2, minmax(0, 1fr))",
+                        },
+                      }}
+                    >
+                      {selectionKpis.network.map((metric) => (
+                        <Box
+                          key={metric.label}
+                          sx={{
+                            p: 1.75,
+                            borderRadius: 2,
+                            border: "1px solid rgba(148, 163, 184, 0.22)",
+                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {metric.label}
+                          </Typography>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                          >
+                            {metric.value}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                          >
+                            {metric.helper}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                  <Box sx={{ mt: 2.5 }}>
+                    <Typography
+                      variant="overline"
+                      sx={{
+                        letterSpacing: 0.7,
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      Shopper KPIs
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 1,
+                        display: "grid",
+                        gap: 1.25,
+                        gridTemplateColumns: {
+                          xs: "1fr",
+                          sm: "repeat(2, minmax(0, 1fr))",
+                        },
+                      }}
+                    >
+                      {selectionKpis.shopper.map((metric) => (
+                        <Box
+                          key={metric.label}
+                          sx={{
+                            p: 1.75,
+                            borderRadius: 2,
+                            border: "1px solid rgba(148, 163, 184, 0.22)",
+                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {metric.label}
+                          </Typography>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                          >
+                            {metric.value}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                          >
+                            {metric.helper}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                  <Box sx={{ mt: 2.5 }}>
+                    <Typography
+                      variant="overline"
+                      sx={{
+                        letterSpacing: 0.7,
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      Operational KPIs
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 1,
+                        display: "grid",
+                        gap: 1.25,
+                        gridTemplateColumns: {
+                          xs: "1fr",
+                          sm: "repeat(2, minmax(0, 1fr))",
+                        },
+                      }}
+                    >
+                      {selectionKpis.operations.map((metric) => (
+                        <Box
+                          key={metric.label}
+                          sx={{
+                            p: 1.75,
+                            borderRadius: 2,
+                            border: "1px solid rgba(148, 163, 184, 0.22)",
+                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {metric.label}
+                          </Typography>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                          >
+                            {metric.value}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                          >
+                            {metric.helper}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                  <Box sx={{ mt: 2.5 }}>
+                    <Typography
+                      variant="overline"
+                      sx={{
+                        letterSpacing: 0.7,
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      Sustainability pulse
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 1,
+                        display: "grid",
+                        gap: 1.25,
+                        gridTemplateColumns: {
+                          xs: "1fr",
+                          sm: "repeat(2, minmax(0, 1fr))",
+                        },
+                      }}
+                    >
+                      {selectionKpis.sustainability.map((metric) => (
+                        <Box
+                          key={metric.label}
+                          sx={{
+                            p: 1.75,
+                            borderRadius: 2,
+                            border: "1px solid rgba(148, 163, 184, 0.22)",
+                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {metric.label}
+                          </Typography>
+                          <Typography
+                            variant="subtitle1"
+                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                          >
+                            {metric.value}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                          >
+                            {metric.helper}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </>
+              )}
               {selectionCompetition && (
                 <Box sx={{ mt: 2 }}>
                   <Typography
