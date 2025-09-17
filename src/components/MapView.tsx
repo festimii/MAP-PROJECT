@@ -18,14 +18,16 @@ import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
-import { area } from "@turf/turf";
+import { area, booleanPointInPolygon, point } from "@turf/turf";
 import {
   Avatar,
   Box,
   Button,
   Chip,
+  Collapse,
   Divider,
   FormControl,
+  IconButton,
   InputLabel,
   LinearProgress,
   MenuItem,
@@ -40,12 +42,30 @@ import type { SelectChangeEvent } from "@mui/material/Select";
 import {
   AccessTime,
   Bolt,
+  ExpandLess,
+  ExpandMore,
   LocationCity,
   MapOutlined,
   ShoppingBag,
   TravelExplore,
   TrendingUp,
   Tune,
+} from "@mui/icons-material";
+import {
+  BakeryDining,
+  Category,
+  Checkroom,
+  DevicesOther,
+  LocalCafe,
+  LocalFlorist,
+  LocalGasStation,
+  LocalGroceryStore,
+  LocalMall,
+  LocalPharmacy,
+  Restaurant,
+  Spa,
+  SportsSoccer,
+  Storefront,
 } from "@mui/icons-material";
 
 import { buildApiUrl } from "../config/apiConfig";
@@ -73,7 +93,7 @@ type StoreFeatureProperties = {
   areaNormalized: string;
   address: string | null;
   format: string | null;
-  sqm: number;
+  sqm: number | null;
   zone: string;
   zoneNormalized: string;
 };
@@ -161,6 +181,27 @@ type PopulationHoverInfo = {
   areaKm2: number | null;
 };
 
+type StoreHoverDetails = {
+  position: {
+    left: number;
+    top: number;
+  };
+  store: {
+    name: string;
+    sqm: number | null;
+    city: string;
+  };
+  population: number | null;
+  competition: {
+    total: number;
+    categories: {
+      category: string;
+      label: string;
+      count: number;
+    }[];
+  };
+};
+
 type MapViewProps = {
   selection: MapSelection | null;
   cities: City[];
@@ -193,6 +234,76 @@ const webMercatorToLonLat = (x: number, y: number): [number, number] => {
   const lng = (x / WEB_MERCATOR_RADIUS) * RAD_TO_DEG;
   const lat = Math.atan(Math.sinh(y / WEB_MERCATOR_RADIUS)) * RAD_TO_DEG;
   return [lng, lat];
+};
+
+const getCompetitionCategoryIcon = (category: string) => {
+  const normalized = category.toLowerCase();
+
+  if (
+    normalized.includes("grocery") ||
+    normalized.includes("market") ||
+    normalized.includes("super")
+  ) {
+    return <LocalGroceryStore fontSize="small" sx={{ color: "#facc15" }} />;
+  }
+
+  if (
+    normalized.includes("cafe") ||
+    normalized.includes("coffee") ||
+    normalized.includes("tea")
+  ) {
+    return <LocalCafe fontSize="small" sx={{ color: "#f97316" }} />;
+  }
+
+  if (normalized.includes("restaurant") || normalized.includes("food")) {
+    return <Restaurant fontSize="small" sx={{ color: "#ef4444" }} />;
+  }
+
+  if (
+    normalized.includes("pharm") ||
+    normalized.includes("health") ||
+    normalized.includes("medical")
+  ) {
+    return <LocalPharmacy fontSize="small" sx={{ color: "#22c55e" }} />;
+  }
+
+  if (normalized.includes("fashion") || normalized.includes("cloth")) {
+    return <Checkroom fontSize="small" sx={{ color: "#38bdf8" }} />;
+  }
+
+  if (normalized.includes("beauty") || normalized.includes("spa")) {
+    return <Spa fontSize="small" sx={{ color: "#ec4899" }} />;
+  }
+
+  if (normalized.includes("flower")) {
+    return <LocalFlorist fontSize="small" sx={{ color: "#f472b6" }} />;
+  }
+
+  if (normalized.includes("gas") || normalized.includes("fuel")) {
+    return <LocalGasStation fontSize="small" sx={{ color: "#fb923c" }} />;
+  }
+
+  if (normalized.includes("sport")) {
+    return <SportsSoccer fontSize="small" sx={{ color: "#0ea5e9" }} />;
+  }
+
+  if (normalized.includes("tech") || normalized.includes("elect")) {
+    return <DevicesOther fontSize="small" sx={{ color: "#8b5cf6" }} />;
+  }
+
+  if (normalized.includes("mall") || normalized.includes("retail")) {
+    return <LocalMall fontSize="small" sx={{ color: "#f97316" }} />;
+  }
+
+  if (normalized.includes("bakery") || normalized.includes("bread")) {
+    return <BakeryDining fontSize="small" sx={{ color: "#facc15" }} />;
+  }
+
+  if (normalized.includes("store")) {
+    return <Storefront fontSize="small" sx={{ color: "#eab308" }} />;
+  }
+
+  return <Category fontSize="small" sx={{ color: "#cbd5f5" }} />;
 };
 
 const convertPopulationGeometryToLonLat = (
@@ -521,7 +632,7 @@ const buildStoreFeatureCollection = (
         areaNormalized: normalizeName(areaName),
         address: store.Adresse ?? null,
         format: store.Format ?? null,
-        sqm: store.SQM ?? 0,
+        sqm: store.SQM ?? null,
         zone: zoneName,
         zoneNormalized: normalizeName(zoneName),
       },
@@ -573,6 +684,22 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [populationHoverInfo, setPopulationHoverInfo] =
     useState<PopulationHoverInfo | null>(null);
   const populationHoverFeatureIdRef = useRef<string | number | null>(null);
+  const populationFeatureCollectionRef = useRef<
+    GeoJSON.FeatureCollection<
+      GeoJSON.Polygon | GeoJSON.MultiPolygon,
+      PopulationFeatureProperties
+    >
+    | null
+  >(null);
+  const storeCompetitionLookup = useRef<
+    Map<string, BusinessProperties[]>
+  >(new Map());
+  const [storeHoverDetails, setStoreHoverDetails] = useState<
+    StoreHoverDetails | null
+  >(null);
+  const [selectionPanelExpanded, setSelectionPanelExpanded] = useState(false);
+  const [populationPanelExpanded, setPopulationPanelExpanded] = useState(false);
+  const [legendExpanded, setLegendExpanded] = useState(false);
 
   const clearPopulationHover = useCallback(() => {
     const map = mapRef.current;
@@ -1045,6 +1172,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   }, [selection, updateStoreFocus]);
 
   useEffect(() => {
+    setStoreHoverDetails(null);
+  }, [selection]);
+
+  useEffect(() => {
     storeFocusRef.current = focusedStore;
     selectionRef.current = selection;
     applySelectionToMap();
@@ -1250,6 +1381,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           const populationData = normalizePopulationCollection(
             rawPopulationData
           );
+
+          populationFeatureCollectionRef.current = populationData;
 
           map.addSource(POPULATION_SOURCE_ID, {
             type: "geojson",
@@ -1639,6 +1772,138 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
         map.on("zoom", handleZoomChange);
 
+        const getPopulationAtPoint = (event: MapLayerMouseEvent) => {
+          let populationValue: number | null = null;
+
+          const renderedFeatures = map.queryRenderedFeatures(event.point, {
+            layers: [POPULATION_FILL_LAYER_ID],
+          }) as MapGeoJSONFeature[];
+
+          const renderedFeature = renderedFeatures?.[0];
+
+          if (renderedFeature?.properties) {
+            const candidate = Number(
+              (renderedFeature.properties as PopulationFeatureProperties)
+                ?.population ?? null
+            );
+            if (Number.isFinite(candidate)) {
+              populationValue = candidate;
+            }
+          }
+
+          if (populationValue == null) {
+            const collection = populationFeatureCollectionRef.current;
+            if (collection) {
+              const populationPoint = point([
+                event.lngLat.lng,
+                event.lngLat.lat,
+              ]);
+
+              for (const feature of collection.features) {
+                if (!feature.geometry) {
+                  continue;
+                }
+
+                if (
+                  booleanPointInPolygon(
+                    populationPoint,
+                    feature as GeoJSON.Feature<
+                      GeoJSON.Polygon | GeoJSON.MultiPolygon,
+                      PopulationFeatureProperties
+                    >
+                  )
+                ) {
+                  const candidate = Number(feature.properties?.population);
+                  if (Number.isFinite(candidate)) {
+                    populationValue = candidate;
+                  }
+                  break;
+                }
+              }
+            }
+          }
+
+          return populationValue;
+        };
+
+        const handleStoreHover = (event: MapLayerMouseEvent) => {
+          if (!event.features?.length) {
+            setStoreHoverDetails(null);
+            return;
+          }
+
+          const props = event.features[0]
+            .properties as unknown as StoreFeatureProperties;
+
+          const competitionEntries =
+            storeCompetitionLookup.current.get(props.department) ?? [];
+
+          const categoryCounts = new Map<
+            string,
+            { label: string; count: number }
+          >();
+
+          for (const business of competitionEntries) {
+            const key = business.category;
+            const current = categoryCounts.get(key);
+            if (current) {
+              current.count += 1;
+              continue;
+            }
+            categoryCounts.set(key, {
+              label: business.categoryLabel || humanizeCategory(key),
+              count: 1,
+            });
+          }
+
+          const categories = Array.from(categoryCounts.entries())
+            .map(([category, value]) => ({
+              category,
+              label: value.label,
+              count: value.count,
+            }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 8);
+
+          const populationValue = getPopulationAtPoint(event);
+          const containerRect = map.getContainer().getBoundingClientRect();
+          const tooltipWidth = 260;
+          const tooltipHeight = categories.length > 0 ? 190 : 150;
+          const baseLeft = event.point.x + 18;
+          const baseTop = event.point.y + 18;
+          const maxLeft = Math.max(8, containerRect.width - tooltipWidth);
+          const maxTop = Math.max(8, containerRect.height - tooltipHeight);
+
+          const rawSqm = props.sqm != null ? Number(props.sqm) : null;
+          const normalizedSqm =
+            rawSqm != null && Number.isFinite(rawSqm) ? rawSqm : null;
+
+          setStoreHoverDetails({
+            position: {
+              left: Math.max(8, Math.min(baseLeft, maxLeft)),
+              top: Math.max(8, Math.min(baseTop, maxTop)),
+            },
+            store: {
+              name: props.department,
+              sqm: normalizedSqm,
+              city: props.city,
+            },
+            population: populationValue,
+            competition: {
+              total: competitionEntries.length,
+              categories,
+            },
+          });
+        };
+
+        const clearStoreHover = () => {
+          setStoreHoverDetails(null);
+        };
+
+        map.on("movestart", clearStoreHover);
+        map.on("pitchstart", clearStoreHover);
+        map.on("rotatestart", clearStoreHover);
+
         const focusStore = (
           props: StoreFeatureProperties,
           lng: number,
@@ -1671,8 +1936,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           const addressLine = props.address
             ? `<div style="margin-top:4px;color:#6b7280">${props.address}</div>`
             : "";
-          const sqmLine = Number.isFinite(props.sqm)
-            ? `<div style="margin-top:4px;color:#0f172a;font-weight:500">${props.sqm.toLocaleString()} m²</div>`
+          const popupSqmValue =
+            props.sqm != null && Number.isFinite(Number(props.sqm))
+              ? Number(props.sqm)
+              : null;
+          const sqmLine = popupSqmValue != null
+            ? `<div style="margin-top:4px;color:#0f172a;font-weight:500">${popupSqmValue.toLocaleString()} m²</div>`
             : "";
           new maplibregl.Popup()
             .setLngLat(e.lngLat)
@@ -1687,6 +1956,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             )
             .addTo(map);
 
+          clearStoreHover();
           focusStore(props, e.lngLat.lng, e.lngLat.lat);
         });
 
@@ -1700,8 +1970,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           const addressLine = props.address
             ? `<div style="margin-top:4px;color:#6b7280">${props.address}</div>`
             : "";
-          const sqmLine = Number.isFinite(props.sqm)
-            ? `<div style="margin-top:4px;color:#0f172a;font-weight:500">${props.sqm.toLocaleString()} m²</div>`
+          const popupSqmValue =
+            props.sqm != null && Number.isFinite(Number(props.sqm))
+              ? Number(props.sqm)
+              : null;
+          const sqmLine = popupSqmValue != null
+            ? `<div style="margin-top:4px;color:#0f172a;font-weight:500">${popupSqmValue.toLocaleString()} m²</div>`
             : "";
           new maplibregl.Popup()
             .setLngLat(e.lngLat)
@@ -1716,20 +1990,25 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             )
             .addTo(map);
 
+          clearStoreHover();
           focusStore(props, e.lngLat.lng, e.lngLat.lat);
         });
 
         map.on("mouseenter", "store-points", () => {
           map.getCanvas().style.cursor = "pointer";
         });
+        map.on("mousemove", "store-points", handleStoreHover);
         map.on("mouseleave", "store-points", () => {
           map.getCanvas().style.cursor = "";
+          clearStoreHover();
         });
         map.on("mouseenter", "store-points-highlight", () => {
           map.getCanvas().style.cursor = "pointer";
         });
+        map.on("mousemove", "store-points-highlight", handleStoreHover);
         map.on("mouseleave", "store-points-highlight", () => {
           map.getCanvas().style.cursor = "";
+          clearStoreHover();
         });
 
         map.on("click", (event) => {
@@ -1743,6 +2022,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
           if (nearbyStoreFeatures.length === 0) {
             updateStoreFocus(null);
+            clearStoreHover();
           }
         });
 
@@ -1796,6 +2076,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
         map.on("mouseenter", "business-points", () => {
           map.getCanvas().style.cursor = "pointer";
+          clearStoreHover();
         });
         map.on("mouseleave", "business-points", () => {
           map.getCanvas().style.cursor = "";
@@ -1823,6 +2104,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
           if (businessesRes.ok) {
             const data: StoreWithBusinesses[] = await businessesRes.json();
+            const competitionMap = new Map<string, BusinessProperties[]>();
             const features = data.flatMap((store) => {
               if (!store.NearbyBusinesses?.length) {
                 return [];
@@ -1839,7 +2121,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     ? normalizedCategoryRaw
                     : "other";
 
-                return {
+                const businessFeature: GeoJSON.Feature<
+                  GeoJSON.Point,
+                  BusinessProperties
+                > = {
                   type: "Feature" as const,
                   geometry: {
                     type: "Point" as const,
@@ -1857,11 +2142,18 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     areaName: store.Area_Name,
                     cityName: store.City_Name,
                   },
-                } satisfies GeoJSON.Feature<GeoJSON.Point, BusinessProperties>;
+                };
+
+                const entries = competitionMap.get(store.Department_Name) ?? [];
+                entries.push(businessFeature.properties);
+                competitionMap.set(store.Department_Name, entries);
+
+                return businessFeature;
               });
             });
 
             businessFeaturesRef.current = features;
+            storeCompetitionLookup.current = competitionMap;
 
             if (isMounted) {
               const categoryToUse = refreshBusinessCategoryState(
@@ -2305,7 +2597,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             elevation={8}
             sx={{
               px: 2,
-              py: 1.75,
+              pt: 1.75,
+              pb: populationPanelExpanded ? 1.75 : 1.5,
               borderRadius: 3,
               backgroundColor: "rgba(15, 23, 42, 0.86)",
               border: "1px solid rgba(148, 163, 184, 0.3)",
@@ -2313,211 +2606,245 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               backdropFilter: "blur(10px)",
             }}
           >
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Bolt sx={{ fontSize: 18, color: "primary.light" }} />
-              <Typography
-                variant="overline"
-                sx={{ letterSpacing: 0.7, color: "rgba(148, 163, 184, 0.8)" }}
-              >
-                Population density
-              </Typography>
-            </Stack>
-            {populationOverlayLoading ? (
-              <Box sx={{ mt: 2 }}>
-                <LinearProgress color="primary" />
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              justifyContent="space-between"
+            >
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Bolt sx={{ fontSize: 18, color: "primary.light" }} />
                 <Typography
-                  variant="caption"
-                  sx={{
-                    display: "block",
-                    mt: 1,
-                    color: "rgba(148, 163, 184, 0.75)",
-                  }}
+                  variant="overline"
+                  sx={{ letterSpacing: 0.7, color: "rgba(148, 163, 184, 0.8)" }}
                 >
-                  Loading Kontur population grid…
+                  Population density
                 </Typography>
-              </Box>
-            ) : (
-              <>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  justifyContent="space-between"
-                  sx={{ mt: 1.5 }}
-                >
-                  <Typography
-                    variant="body2"
-                    sx={{ color: "rgba(226, 232, 240, 0.85)" }}
-                  >
-                    Overlay visibility
-                  </Typography>
-                  <Switch
-                    size="small"
-                    checked={populationOverlayEnabled}
-                    onChange={handlePopulationOverlayToggle}
-                    disabled={!populationOverlayAvailable}
-                  />
-                </Stack>
-                {populationOverlayError ? (
+              </Stack>
+              <IconButton
+                size="small"
+                aria-label={
+                  populationPanelExpanded
+                    ? "Collapse population density panel"
+                    : "Expand population density panel"
+                }
+                aria-expanded={populationPanelExpanded}
+                onClick={() =>
+                  setPopulationPanelExpanded((previous) => !previous)
+                }
+                sx={{
+                  ml: 1,
+                  bgcolor: "rgba(30, 41, 59, 0.6)",
+                  color: "rgba(148, 163, 184, 0.9)",
+                  border: "1px solid rgba(148, 163, 184, 0.3)",
+                  "&:hover": {
+                    bgcolor: "rgba(30, 41, 59, 0.8)",
+                  },
+                }}
+              >
+                {populationPanelExpanded ? (
+                  <ExpandLess fontSize="small" />
+                ) : (
+                  <ExpandMore fontSize="small" />
+                )}
+              </IconButton>
+            </Stack>
+            <Collapse in={populationPanelExpanded} timeout="auto" unmountOnExit>
+              {populationOverlayLoading ? (
+                <Box sx={{ mt: 2 }}>
+                  <LinearProgress color="primary" />
                   <Typography
                     variant="caption"
                     sx={{
-                      mt: 1,
                       display: "block",
-                      color: "rgba(248, 113, 113, 0.9)",
+                      mt: 1,
+                      color: "rgba(148, 163, 184, 0.75)",
                     }}
                   >
-                    {populationOverlayError}
+                    Loading Kontur population grid…
                   </Typography>
-                ) : (
-                  <>
+                </Box>
+              ) : (
+                <Box sx={{ mt: 1.5 }}>
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                  >
+                    <Typography
+                      variant="body2"
+                      sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+                    >
+                      Overlay visibility
+                    </Typography>
+                    <Switch
+                      size="small"
+                      checked={populationOverlayEnabled}
+                      onChange={handlePopulationOverlayToggle}
+                      disabled={!populationOverlayAvailable}
+                    />
+                  </Stack>
+                  {populationOverlayError ? (
                     <Typography
                       variant="caption"
                       sx={{
                         mt: 1,
                         display: "block",
-                        color: "rgba(148, 163, 184, 0.75)",
+                        color: "rgba(248, 113, 113, 0.9)",
                       }}
                     >
-                      {populationOverlayStats
-                        ? `${populationOverlayStats.cellCount.toLocaleString()} grid cells · ${Math.round(
-                            populationOverlayStats.totalPopulation
-                          ).toLocaleString()} people total`
-                        : "Toggle to reveal Kontur population intensity."}
+                      {populationOverlayError}
                     </Typography>
-                    <Box
-                      sx={{
-                        mt: 1.5,
-                        height: 12,
-                        borderRadius: 999,
-                        background:
-                          "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
-                        border: "1px solid rgba(148, 163, 184, 0.4)",
-                      }}
-                    />
-                    <Stack
-                      direction="row"
-                      justifyContent="space-between"
-                      sx={{ mt: 0.5 }}
-                    >
-                      <Typography
-                        variant="caption"
-                        sx={{ color: "rgba(148, 163, 184, 0.7)" }}
-                      >
-                        Lower
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        sx={{ color: "rgba(148, 163, 184, 0.7)" }}
-                      >
-                        Higher
-                      </Typography>
-                    </Stack>
-                    <Box
-                      sx={{
-                        mt: 1.5,
-                        px: 1.25,
-                        py: 1,
-                        borderRadius: 2,
-                        backgroundColor: "rgba(15, 23, 42, 0.55)",
-                        border: "1px solid rgba(148, 163, 184, 0.35)",
-                      }}
-                    >
+                  ) : (
+                    <>
                       <Typography
                         variant="caption"
                         sx={{
+                          mt: 1,
                           display: "block",
-                          textTransform: "uppercase",
-                          letterSpacing: 0.6,
                           color: "rgba(148, 163, 184, 0.75)",
-                          mb: 0.75,
                         }}
                       >
-                        Hover insight
+                        {populationOverlayStats
+                          ? `${populationOverlayStats.cellCount.toLocaleString()} grid cells · ${Math.round(
+                              populationOverlayStats.totalPopulation
+                            ).toLocaleString()} people total`
+                          : "Toggle to reveal Kontur population intensity."}
                       </Typography>
-                      {populationOverlayEnabled && populationHoverInfo ? (
-                        <Stack spacing={0.75}>
-                          <Typography
-                            variant="body2"
-                            sx={{
-                              fontWeight: 600,
-                              color: "rgba(226, 232, 240, 0.95)",
-                            }}
-                          >
-                            ~
-                            {Math.round(
-                              populationHoverInfo.population
-                            ).toLocaleString()} people
-                          </Typography>
-                          <Stack direction="row" spacing={1.5}>
-                            <Typography
-                              variant="caption"
-                              sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                            >
-                              Density:
-                              <Box component="span" sx={{ ml: 0.5 }}>
-                                {populationHoverInfo.density
-                                  ? `${Math.round(
-                                      populationHoverInfo.density
-                                    ).toLocaleString()} people/km²`
-                                  : "—"}
-                              </Box>
-                            </Typography>
-                            <Typography
-                              variant="caption"
-                              sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                            >
-                              Area:
-                              <Box component="span" sx={{ ml: 0.5 }}>
-                                {populationHoverInfo.areaKm2
-                                  ? `${populationHoverInfo.areaKm2.toFixed(
-                                      populationHoverInfo.areaKm2 >= 10 ? 1 : 2
-                                    )} km²`
-                                  : "—"}
-                              </Box>
-                            </Typography>
-                          </Stack>
-                        </Stack>
-                      ) : (
+                      <Box
+                        sx={{
+                          mt: 1.5,
+                          height: 12,
+                          borderRadius: 999,
+                          background:
+                            "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
+                          border: "1px solid rgba(148, 163, 184, 0.4)",
+                        }}
+                      />
+                      <Stack
+                        direction="row"
+                        justifyContent="space-between"
+                        sx={{ mt: 0.5 }}
+                      >
                         <Typography
                           variant="caption"
                           sx={{ color: "rgba(148, 163, 184, 0.7)" }}
                         >
-                          {populationOverlayEnabled
-                            ? "Hover over the map to estimate people covered by each grid cell."
-                            : "Enable the overlay to explore people per grid cell."}
+                          Lower
                         </Typography>
-                      )}
-                    </Box>
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        mt: 1.5,
-                        display: "block",
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Opacity
-                    </Typography>
-                    <Slider
-                      size="small"
-                      value={Math.round(populationOverlayOpacity * 100)}
-                      onChange={handlePopulationOpacityChange}
-                      step={5}
-                      min={20}
-                      max={100}
-                      disabled={!populationOverlayEnabled}
-                      sx={{
-                        mt: 0.5,
-                        color: "#f97316",
-                        "& .MuiSlider-thumb": {
-                          boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.25)",
-                        },
-                      }}
-                    />
-                  </>
-                )}
-              </>
-            )}
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "rgba(148, 163, 184, 0.7)" }}
+                        >
+                          Higher
+                        </Typography>
+                      </Stack>
+                      <Box
+                        sx={{
+                          mt: 1.5,
+                          p: 1.25,
+                          borderRadius: 2,
+                          backgroundColor: "rgba(30, 41, 59, 0.8)",
+                          border: "1px solid rgba(148, 163, 184, 0.25)",
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            textTransform: "uppercase",
+                            letterSpacing: 0.6,
+                            color: "rgba(148, 163, 184, 0.7)",
+                            fontWeight: 600,
+                            mb: 0.75,
+                          }}
+                        >
+                          Hover insight
+                        </Typography>
+                        {populationOverlayEnabled && populationHoverInfo ? (
+                          <Stack spacing={0.75}>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 600,
+                                color: "rgba(226, 232, 240, 0.95)",
+                              }}
+                            >
+                              ~
+                              {Math.round(
+                                populationHoverInfo.population
+                              ).toLocaleString()} people
+                            </Typography>
+                            <Stack direction="row" spacing={1.5}>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                              >
+                                Density:
+                                <Box component="span" sx={{ ml: 0.5 }}>
+                                  {populationHoverInfo.density
+                                    ? `${Math.round(
+                                        populationHoverInfo.density
+                                      ).toLocaleString()} people/km²`
+                                    : "—"}
+                                </Box>
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                              >
+                                Area:
+                                <Box component="span" sx={{ ml: 0.5 }}>
+                                  {populationHoverInfo.areaKm2
+                                    ? `${populationHoverInfo.areaKm2.toFixed(
+                                        populationHoverInfo.areaKm2 >= 10 ? 1 : 2
+                                      )} km²`
+                                    : "—"}
+                                </Box>
+                              </Typography>
+                            </Stack>
+                          </Stack>
+                        ) : (
+                          <Typography
+                            variant="caption"
+                            sx={{ color: "rgba(148, 163, 184, 0.7)" }}
+                          >
+                            {populationOverlayEnabled
+                              ? "Hover over the map to estimate people covered by each grid cell."
+                              : "Enable the overlay to explore people per grid cell."}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          mt: 1.5,
+                          display: "block",
+                          color: "rgba(148, 163, 184, 0.75)",
+                        }}
+                      >
+                        Opacity
+                      </Typography>
+                      <Slider
+                        size="small"
+                        value={Math.round(populationOverlayOpacity * 100)}
+                        onChange={handlePopulationOpacityChange}
+                        step={5}
+                        min={20}
+                        max={100}
+                        disabled={!populationOverlayEnabled}
+                        sx={{
+                          mt: 0.5,
+                          color: "#f97316",
+                          "& .MuiSlider-thumb": {
+                            boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.25)",
+                          },
+                        }}
+                      />
+                    </>
+                  )}
+                </Box>
+              )}
+            </Collapse>
           </Paper>
           {businessCategories.length > 0 && (
             <Paper
@@ -2627,621 +2954,673 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               overflow: "hidden",
             }}
           >
-            <Box sx={{ p: 2.5, pb: 2 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
-                <Typography
-                  variant="overline"
-                  sx={{
-                    letterSpacing: 0.8,
-                    color: "rgba(148, 163, 184, 0.85)",
-                  }}
-                >
-                  {selectionSummary.focusLabel}
-                </Typography>
-              </Stack>
-              <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
-                {selectionSummary.label}
-              </Typography>
-              {selectionSummary.mode === "city" && (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="info"
-                  startIcon={<TravelExplore fontSize="small" />}
-                  sx={{
-                    mt: 1.5,
-                    borderRadius: 9999,
-                    alignSelf: "flex-start",
-                  }}
-                  onClick={() =>
-                    navigate(
-                      `/report/${encodeURIComponent(selectionSummary.label)}`
-                    )
-                  }
-                >
-                  Open layered report
-                </Button>
-              )}
-              {selectionKpis && (
-                <Box
-                  sx={{
-                    mt: 2,
-                    p: 2,
-                    borderRadius: 2.5,
-                    backgroundImage:
-                      "linear-gradient(135deg, rgba(59,130,246,0.14), rgba(236,72,153,0.08))",
-                    border: "1px solid rgba(96, 165, 250, 0.35)",
-                  }}
-                >
-                  <Stack
-                    direction={{ xs: "column", sm: "row" }}
-                    spacing={2}
-                    alignItems="stretch"
-                  >
-                    <Stack
-                      direction="row"
-                      spacing={1.5}
-                      alignItems="center"
-                      sx={{ flex: 1 }}
+            <Box
+              sx={{
+                p: 2.5,
+                pb: selectionPanelExpanded ? 0 : 2.5,
+              }}
+            >
+              <Stack
+                direction="row"
+                spacing={1.5}
+                alignItems="flex-start"
+                justifyContent="space-between"
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <LocationCity
+                      sx={{ fontSize: 20, color: "primary.light" }}
+                    />
+                    <Typography
+                      variant="overline"
+                      sx={{
+                        letterSpacing: 0.8,
+                        color: "rgba(148, 163, 184, 0.85)",
+                      }}
                     >
-                      <Avatar
-                        variant="rounded"
-                        sx={{
-                          bgcolor: "rgba(59, 130, 246, 0.22)",
-                          border: "1px solid rgba(96, 165, 250, 0.4)",
-                          color: "rgba(191, 219, 254, 0.95)",
-                        }}
-                      >
-                        <Bolt fontSize="small" />
-                      </Avatar>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            letterSpacing: 0.8,
-                            color: "rgba(191, 219, 254, 0.75)",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          Opportunity score
-                        </Typography>
-                        <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                          {selectionKpis.summary.opportunityScore}
-                        </Typography>
-                        <LinearProgress
-                          variant="determinate"
-                          value={selectionKpis.summary.opportunityScore}
-                          sx={{ mt: 1, height: 6, borderRadius: 999 }}
-                        />
-                      </Box>
-                    </Stack>
-                    <Stack
-                      direction="row"
-                      spacing={1.5}
-                      alignItems="center"
-                      sx={{ flex: 1 }}
-                    >
-                      <Avatar
-                        variant="rounded"
-                        sx={{
-                          bgcolor: "rgba(16, 185, 129, 0.22)",
-                          border: "1px solid rgba(52, 211, 153, 0.4)",
-                          color: "rgba(167, 243, 208, 0.95)",
-                        }}
-                      >
-                        <TrendingUp fontSize="small" />
-                      </Avatar>
-                      <Box>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            letterSpacing: 0.8,
-                            color: "rgba(167, 243, 208, 0.8)",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          Momentum index
-                        </Typography>
-                        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                          {selectionKpis.summary.momentumIndex}
-                        </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color:
-                              selectionKpis.summary.yoyTrend >= 0
-                                ? "rgba(134, 239, 172, 0.95)"
-                                : "rgba(248, 113, 113, 0.92)",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {`${selectionKpis.summary.yoyTrend >= 0 ? "+" : ""}${
-                            selectionKpis.summary.yoyTrend
-                          }% YoY`}
-                        </Typography>
-                      </Box>
-                    </Stack>
+                      {selectionSummary.focusLabel}
+                    </Typography>
                   </Stack>
-                  <Typography
-                    variant="body2"
-                    sx={{ mt: 2, color: "rgba(226, 232, 240, 0.85)" }}
-                  >
-                    {`Focus on ${selectionKpis.summary.primaryFocus} while building momentum in ${selectionKpis.summary.secondaryFocus}.`}
+                  <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
+                    {selectionSummary.label}
                   </Typography>
+                </Box>
+                <IconButton
+                  size="small"
+                  aria-label={
+                    selectionPanelExpanded
+                      ? "Collapse selection details"
+                      : "Expand selection details"
+                  }
+                  aria-expanded={selectionPanelExpanded}
+                  onClick={() =>
+                    setSelectionPanelExpanded((previous) => !previous)
+                  }
+                  sx={{
+                    ml: 1,
+                    bgcolor: "rgba(30, 41, 59, 0.6)",
+                    color: "rgba(148, 163, 184, 0.9)",
+                    border: "1px solid rgba(148, 163, 184, 0.3)",
+                    "&:hover": {
+                      bgcolor: "rgba(30, 41, 59, 0.8)",
+                    },
+                  }}
+                >
+                  {selectionPanelExpanded ? (
+                    <ExpandLess fontSize="small" />
+                  ) : (
+                    <ExpandMore fontSize="small" />
+                  )}
+                </IconButton>
+              </Stack>
+            </Box>
+            <Collapse in={selectionPanelExpanded} timeout="auto" unmountOnExit>
+              <Box>
+                <Box sx={{ px: 2.5, pt: 2, pb: 2 }}>
+                  {selectionSummary.mode === "city" && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="info"
+                      startIcon={<TravelExplore fontSize="small" />}
+                      sx={{
+                        mt: 1.5,
+                        borderRadius: 9999,
+                        alignSelf: "flex-start",
+                      }}
+                      onClick={() =>
+                        navigate(
+                          `/report/${encodeURIComponent(selectionSummary.label)}`
+                        )
+                      }
+                    >
+                      Open layered report
+                    </Button>
+                  )}
+                  {selectionKpis && (
+                    <Box
+                      sx={{
+                        mt: 2,
+                        p: 2,
+                        borderRadius: 2.5,
+                        backgroundImage:
+                          "linear-gradient(135deg, rgba(59,130,246,0.14), rgba(236,72,153,0.08))",
+                        border: "1px solid rgba(96, 165, 250, 0.35)",
+                      }}
+                    >
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={2}
+                        alignItems="stretch"
+                      >
+                        <Stack
+                          direction="row"
+                          spacing={1.5}
+                          alignItems="center"
+                          sx={{ flex: 1 }}
+                        >
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              bgcolor: "rgba(59, 130, 246, 0.22)",
+                              border: "1px solid rgba(96, 165, 250, 0.4)",
+                              color: "rgba(191, 219, 254, 0.95)",
+                            }}
+                          >
+                            <Bolt fontSize="small" />
+                          </Avatar>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                letterSpacing: 0.8,
+                                color: "rgba(191, 219, 254, 0.75)",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Opportunity score
+                            </Typography>
+                            <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                              {selectionKpis.summary.opportunityScore}
+                            </Typography>
+                            <LinearProgress
+                              variant="determinate"
+                              value={selectionKpis.summary.opportunityScore}
+                              sx={{ mt: 1, height: 6, borderRadius: 999 }}
+                            />
+                          </Box>
+                        </Stack>
+                        <Stack
+                          direction="row"
+                          spacing={1.5}
+                          alignItems="center"
+                          sx={{ flex: 1 }}
+                        >
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              bgcolor: "rgba(16, 185, 129, 0.22)",
+                              border: "1px solid rgba(52, 211, 153, 0.4)",
+                              color: "rgba(167, 243, 208, 0.95)",
+                            }}
+                          >
+                            <TrendingUp fontSize="small" />
+                          </Avatar>
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                letterSpacing: 0.8,
+                                color: "rgba(167, 243, 208, 0.8)",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Momentum index
+                            </Typography>
+                            <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                              {selectionKpis.summary.momentumIndex}
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                color:
+                                  selectionKpis.summary.yoyTrend >= 0
+                                    ? "rgba(134, 239, 172, 0.95)"
+                                    : "rgba(248, 113, 113, 0.92)",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {`${selectionKpis.summary.yoyTrend >= 0 ? "+" : ""}${
+                                selectionKpis.summary.yoyTrend
+                              }% YoY`}
+                            </Typography>
+                          </Box>
+                        </Stack>
+                      </Stack>
+                      <Typography
+                        variant="body2"
+                        sx={{ mt: 2, color: "rgba(226, 232, 240, 0.85)" }}
+                      >
+                        {`Focus on ${selectionKpis.summary.primaryFocus} while building momentum in ${selectionKpis.summary.secondaryFocus}.`}
+                      </Typography>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        sx={{ mt: 1.5, flexWrap: "wrap" }}
+                      >
+                        <Chip
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                          label={selectionKpis.summary.primaryFocus}
+                        />
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={`Support: ${selectionKpis.summary.secondaryFocus}`}
+                          sx={{ borderColor: "rgba(96, 165, 250, 0.4)" }}
+                        />
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          icon={<AccessTime fontSize="small" />}
+                          label={`Dwell ${selectionKpis.dwellTime} min`}
+                        />
+                        <Chip
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                          icon={<ShoppingBag fontSize="small" />}
+                          label={`Avg basket €${selectionKpis.avgBasket.toFixed(
+                            1
+                          )}`}
+                        />
+                      </Stack>
+                    </Box>
+                  )}
                   <Stack
                     direction="row"
                     spacing={1}
                     sx={{ mt: 1.5, flexWrap: "wrap" }}
                   >
-                    <Chip
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                      label={selectionKpis.summary.primaryFocus}
-                    />
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      label={`Support: ${selectionKpis.summary.secondaryFocus}`}
-                      sx={{ borderColor: "rgba(96, 165, 250, 0.4)" }}
-                    />
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      icon={<AccessTime fontSize="small" />}
-                      label={`Dwell ${selectionKpis.dwellTime} min`}
-                    />
-                    <Chip
-                      size="small"
-                      color="secondary"
-                      variant="outlined"
-                      icon={<ShoppingBag fontSize="small" />}
-                      label={`Avg basket €${selectionKpis.avgBasket.toFixed(
-                        1
-                      )}`}
-                    />
+                    {selectionSummary.cities.map((city) => (
+                      <Chip
+                        key={city}
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        label={city}
+                      />
+                    ))}
                   </Stack>
-                </Box>
-              )}
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ mt: 1.5, flexWrap: "wrap" }}
-              >
-                {selectionSummary.cities.map((city) => (
-                  <Chip
-                    key={city}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                    label={city}
-                  />
-                ))}
-              </Stack>
-              {selectionSummary.mode === "zone" &&
-                selectionSummary.areas.length > 0 && (
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        letterSpacing: 0.7,
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Areas
-                    </Typography>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      sx={{ flexWrap: "wrap", mt: 0.5 }}
-                    >
-                      {selectionSummary.areas.map((area) => (
-                        <Chip
-                          key={area}
-                          size="small"
-                          variant="outlined"
-                          label={area}
+                  {selectionSummary.mode === "zone" &&
+                    selectionSummary.areas.length > 0 && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <Typography
+                          variant="overline"
                           sx={{
-                            borderColor: "rgba(148, 163, 184, 0.4)",
-                            color: "rgba(226, 232, 240, 0.9)",
+                            letterSpacing: 0.7,
+                            color: "rgba(148, 163, 184, 0.75)",
                           }}
-                        />
-                      ))}
-                    </Stack>
-                  </Box>
-                )}
-            </Box>
-            <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
-            <Box sx={{ p: 2, pt: 1.5 }}>
-              <Stack direction="row" spacing={1.25} sx={{ flexWrap: "wrap" }}>
-                {[
-                  {
-                    label: "Stores",
-                    value: selectionSummary.storeCount.toLocaleString(),
-                  },
-                  {
-                    label: "Total SQM",
-                    value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
-                  },
-                  {
-                    label: "Geo coverage",
-                    value: `${geoCoveragePercent}%`,
-                    helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
-                  },
-                ].map(({ label, value, helper }) => (
-                  <Box
-                    key={label}
-                    sx={{
-                      flex: "1 1 120px",
-                      px: 1.5,
-                      py: 1.25,
-                      borderRadius: 2,
-                      border: "1px solid rgba(148, 163, 184, 0.25)",
-                      bgcolor: "rgba(30, 41, 59, 0.55)",
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        color: "rgba(191, 219, 254, 0.7)",
-                        letterSpacing: 0.6,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {label}
-                    </Typography>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                      {value}
-                    </Typography>
-                    {helper && (
-                      <Typography
-                        variant="caption"
-                        sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                      >
-                        {helper}
-                      </Typography>
+                        >
+                          Areas
+                        </Typography>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ flexWrap: "wrap", mt: 0.5 }}
+                        >
+                          {selectionSummary.areas.map((area) => (
+                            <Chip
+                              key={area}
+                              size="small"
+                              variant="outlined"
+                              label={area}
+                              sx={{
+                                borderColor: "rgba(148, 163, 184, 0.4)",
+                                color: "rgba(226, 232, 240, 0.9)",
+                              }}
+                            />
+                          ))}
+                        </Stack>
+                      </Box>
                     )}
-                  </Box>
-                ))}
-              </Stack>
-              {selectionKpis && (
-                <>
-                  <Divider
-                    sx={{
-                      mt: 2,
-                      mb: 1.5,
-                      borderColor: "rgba(148, 163, 184, 0.18)",
-                    }}
-                  />
-                  <Box>
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        letterSpacing: 0.7,
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Network KPIs
-                    </Typography>
-                    <Box
-                      sx={{
-                        mt: 1,
-                        display: "grid",
-                        gap: 1.25,
-                        gridTemplateColumns: {
-                          xs: "1fr",
-                          sm: "repeat(2, minmax(0, 1fr))",
-                        },
-                      }}
-                    >
-                      {selectionKpis.network.map((metric) => (
-                        <Box
-                          key={metric.label}
+                </Box>
+                <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
+                <Box sx={{ p: 2, pt: 1.5 }}>
+                  <Stack direction="row" spacing={1.25} sx={{ flexWrap: "wrap" }}>
+                    {[
+                      {
+                        label: "Stores",
+                        value: selectionSummary.storeCount.toLocaleString(),
+                      },
+                      {
+                        label: "Total SQM",
+                        value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
+                      },
+                      {
+                        label: "Geo coverage",
+                        value: `${geoCoveragePercent}%`,
+                        helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
+                      },
+                    ].map(({ label, value, helper }) => (
+                      <Box
+                        key={label}
+                        sx={{
+                          flex: "1 1 120px",
+                          px: 1.5,
+                          py: 1.25,
+                          borderRadius: 2,
+                          border: "1px solid rgba(148, 163, 184, 0.25)",
+                          bgcolor: "rgba(30, 41, 59, 0.55)",
+                        }}
+                      >
+                        <Typography
+                          variant="caption"
                           sx={{
-                            p: 1.75,
-                            borderRadius: 2,
-                            border: "1px solid rgba(148, 163, 184, 0.22)",
-                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                            color: "rgba(191, 219, 254, 0.7)",
+                            letterSpacing: 0.6,
+                            textTransform: "uppercase",
                           }}
                         >
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {metric.label}
-                          </Typography>
-                          <Typography
-                            variant="subtitle1"
-                            sx={{
-                              fontWeight: 600,
-                              color: "rgba(191, 219, 254, 0.95)",
-                            }}
-                          >
-                            {metric.value}
-                          </Typography>
+                          {label}
+                        </Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                          {value}
+                        </Typography>
+                        {helper && (
                           <Typography
                             variant="caption"
                             sx={{ color: "rgba(148, 163, 184, 0.75)" }}
                           >
-                            {metric.helper}
+                            {helper}
                           </Typography>
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                  <Box sx={{ mt: 2.5 }}>
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        letterSpacing: 0.7,
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Shopper KPIs
-                    </Typography>
-                    <Box
-                      sx={{
-                        mt: 1,
-                        display: "grid",
-                        gap: 1.25,
-                        gridTemplateColumns: {
-                          xs: "1fr",
-                          sm: "repeat(2, minmax(0, 1fr))",
-                        },
-                      }}
-                    >
-                      {selectionKpis.shopper.map((metric) => (
-                        <Box
-                          key={metric.label}
+                        )}
+                      </Box>
+                    ))}
+                  </Stack>
+                  {selectionKpis && (
+                    <>
+                      <Divider
+                        sx={{
+                          mt: 2,
+                          mb: 1.5,
+                          borderColor: "rgba(148, 163, 184, 0.18)",
+                        }}
+                      />
+                      <Box>
+                        <Typography
+                          variant="overline"
                           sx={{
-                            p: 1.75,
-                            borderRadius: 2,
-                            border: "1px solid rgba(148, 163, 184, 0.22)",
-                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                            letterSpacing: 0.7,
+                            color: "rgba(148, 163, 184, 0.75)",
                           }}
                         >
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {metric.label}
-                          </Typography>
-                          <Typography
-                            variant="subtitle1"
-                            sx={{
-                              fontWeight: 600,
-                              color: "rgba(191, 219, 254, 0.95)",
-                            }}
-                          >
-                            {metric.value}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                          >
-                            {metric.helper}
-                          </Typography>
-                        </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                  <Box sx={{ mt: 2.5 }}>
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        letterSpacing: 0.7,
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Operational KPIs
-                    </Typography>
-                    <Box
-                      sx={{
-                        mt: 1,
-                        display: "grid",
-                        gap: 1.25,
-                        gridTemplateColumns: {
-                          xs: "1fr",
-                          sm: "repeat(2, minmax(0, 1fr))",
-                        },
-                      }}
-                    >
-                      {selectionKpis.operations.map((metric) => (
+                          Network KPIs
+                        </Typography>
                         <Box
-                          key={metric.label}
                           sx={{
-                            p: 1.75,
-                            borderRadius: 2,
-                            border: "1px solid rgba(148, 163, 184, 0.22)",
-                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                            mt: 1,
+                            display: "grid",
+                            gap: 1.25,
+                            gridTemplateColumns: {
+                              xs: "1fr",
+                              sm: "repeat(2, minmax(0, 1fr))",
+                            },
                           }}
                         >
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {metric.label}
-                          </Typography>
-                          <Typography
-                            variant="subtitle1"
-                            sx={{
-                              fontWeight: 600,
-                              color: "rgba(191, 219, 254, 0.95)",
-                            }}
-                          >
-                            {metric.value}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                          >
-                            {metric.helper}
-                          </Typography>
+                          {selectionKpis.network.map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 1.75,
+                                borderRadius: 2,
+                                border: "1px solid rgba(148, 163, 184, 0.22)",
+                                bgcolor: "rgba(15, 23, 42, 0.6)",
+                              }}
+                            >
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {metric.label}
+                              </Typography>
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  fontWeight: 600,
+                                  color: "rgba(191, 219, 254, 0.95)",
+                                }}
+                              >
+                                {metric.value}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                              >
+                                {metric.helper}
+                              </Typography>
+                            </Box>
+                          ))}
                         </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                  <Box sx={{ mt: 2.5 }}>
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        letterSpacing: 0.7,
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Sustainability pulse
-                    </Typography>
-                    <Box
-                      sx={{
-                        mt: 1,
-                        display: "grid",
-                        gap: 1.25,
-                        gridTemplateColumns: {
-                          xs: "1fr",
-                          sm: "repeat(2, minmax(0, 1fr))",
-                        },
-                      }}
-                    >
-                      {selectionKpis.sustainability.map((metric) => (
-                        <Box
-                          key={metric.label}
+                      </Box>
+                      <Box sx={{ mt: 2.5 }}>
+                        <Typography
+                          variant="overline"
                           sx={{
-                            p: 1.75,
-                            borderRadius: 2,
-                            border: "1px solid rgba(148, 163, 184, 0.22)",
-                            bgcolor: "rgba(15, 23, 42, 0.6)",
+                            letterSpacing: 0.7,
+                            color: "rgba(148, 163, 184, 0.75)",
                           }}
                         >
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {metric.label}
-                          </Typography>
-                          <Typography
-                            variant="subtitle1"
-                            sx={{
-                              fontWeight: 600,
-                              color: "rgba(191, 219, 254, 0.95)",
-                            }}
-                          >
-                            {metric.value}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                          >
-                            {metric.helper}
-                          </Typography>
+                          Shopper KPIs
+                        </Typography>
+                        <Box
+                          sx={{
+                            mt: 1,
+                            display: "grid",
+                            gap: 1.25,
+                            gridTemplateColumns: {
+                              xs: "1fr",
+                              sm: "repeat(2, minmax(0, 1fr))",
+                            },
+                          }}
+                        >
+                          {selectionKpis.shopper.map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 1.75,
+                                borderRadius: 2,
+                                border: "1px solid rgba(148, 163, 184, 0.22)",
+                                bgcolor: "rgba(15, 23, 42, 0.6)",
+                              }}
+                            >
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {metric.label}
+                              </Typography>
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  fontWeight: 600,
+                                  color: "rgba(191, 219, 254, 0.95)",
+                                }}
+                              >
+                                {metric.value}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                              >
+                                {metric.helper}
+                              </Typography>
+                            </Box>
+                          ))}
                         </Box>
-                      ))}
-                    </Box>
-                  </Box>
-                </>
-              )}
-              {selectionCompetition && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography
-                    variant="subtitle2"
-                    sx={{ fontWeight: 600, color: "rgba(167, 243, 208, 0.95)" }}
-                  >
-                    Nearby competition
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{ color: "rgba(226, 232, 240, 0.8)" }}
-                  >
-                    {selectionCompetition.total > 0
-                      ? `${selectionCompetition.total.toLocaleString()} nearby location${
-                          selectionCompetition.total === 1 ? "" : "s"
-                        }`
-                      : "No competition data yet"}
-                  </Typography>
-                  {selectionCompetition.topCategories.length > 0 && (
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      sx={{ mt: 1, flexWrap: "wrap" }}
-                    >
-                      {selectionCompetition.topCategories.map(
-                        ({ category, label, count }) => (
-                          <Chip
-                            key={category}
-                            label={`${label} (${count})`}
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                            sx={{
-                              bgcolor: "rgba(16, 185, 129, 0.14)",
-                              color: "rgba(167, 243, 208, 0.95)",
-                              borderColor: "rgba(16, 185, 129, 0.35)",
-                            }}
-                          />
-                        )
+                      </Box>
+                      <Box sx={{ mt: 2.5 }}>
+                        <Typography
+                          variant="overline"
+                          sx={{
+                            letterSpacing: 0.7,
+                            color: "rgba(148, 163, 184, 0.75)",
+                          }}
+                        >
+                          Operational KPIs
+                        </Typography>
+                        <Box
+                          sx={{
+                            mt: 1,
+                            display: "grid",
+                            gap: 1.25,
+                            gridTemplateColumns: {
+                              xs: "1fr",
+                              sm: "repeat(2, minmax(0, 1fr))",
+                            },
+                          }}
+                        >
+                          {selectionKpis.operations.map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 1.75,
+                                borderRadius: 2,
+                                border: "1px solid rgba(148, 163, 184, 0.22)",
+                                bgcolor: "rgba(15, 23, 42, 0.6)",
+                              }}
+                            >
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {metric.label}
+                              </Typography>
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  fontWeight: 600,
+                                  color: "rgba(191, 219, 254, 0.95)",
+                                }}
+                              >
+                                {metric.value}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                              >
+                                {metric.helper}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                      <Box sx={{ mt: 2.5 }}>
+                        <Typography
+                          variant="overline"
+                          sx={{
+                            letterSpacing: 0.7,
+                            color: "rgba(148, 163, 184, 0.75)",
+                          }}
+                        >
+                          Sustainability pulse
+                        </Typography>
+                        <Box
+                          sx={{
+                            mt: 1,
+                            display: "grid",
+                            gap: 1.25,
+                            gridTemplateColumns: {
+                              xs: "1fr",
+                              sm: "repeat(2, minmax(0, 1fr))",
+                            },
+                          }}
+                        >
+                          {selectionKpis.sustainability.map((metric) => (
+                            <Box
+                              key={metric.label}
+                              sx={{
+                                p: 1.75,
+                                borderRadius: 2,
+                                border: "1px solid rgba(148, 163, 184, 0.22)",
+                                bgcolor: "rgba(15, 23, 42, 0.6)",
+                              }}
+                            >
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {metric.label}
+                              </Typography>
+                              <Typography
+                                variant="subtitle1"
+                                sx={{
+                                  fontWeight: 600,
+                                  color: "rgba(191, 219, 254, 0.95)",
+                                }}
+                              >
+                                {metric.value}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                              >
+                                {metric.helper}
+                              </Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    </>
+                  )}
+                  {selectionCompetition && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography
+                        variant="subtitle2"
+                        sx={{
+                          fontWeight: 600,
+                          color: "rgba(167, 243, 208, 0.95)",
+                        }}
+                      >
+                        Nearby competition
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: "rgba(226, 232, 240, 0.8)" }}
+                      >
+                        {selectionCompetition.total > 0
+                          ? `${selectionCompetition.total.toLocaleString()} nearby location${
+                              selectionCompetition.total === 1 ? "" : "s"
+                            }`
+                          : "No competition data yet"}
+                      </Typography>
+                      {selectionCompetition.topCategories.length > 0 && (
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ mt: 1, flexWrap: "wrap" }}
+                        >
+                          {selectionCompetition.topCategories.map(
+                            ({ category, label, count }) => (
+                              <Chip
+                                key={category}
+                                label={`${label} (${count})`}
+                                size="small"
+                                color="success"
+                                variant="outlined"
+                                sx={{
+                                  bgcolor: "rgba(16, 185, 129, 0.14)",
+                                  color: "rgba(167, 243, 208, 0.95)",
+                                  borderColor: "rgba(16, 185, 129, 0.35)",
+                                }}
+                              />
+                            )
+                          )}
+                        </Stack>
                       )}
-                    </Stack>
+                    </Box>
                   )}
                 </Box>
-              )}
-            </Box>
-            <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
-            <Box sx={{ px: 2, py: 2, overflowY: "auto", maxHeight: 240 }}>
-              {displayedStores.length === 0 ? (
-                <Typography
-                  variant="body2"
-                  sx={{ color: "rgba(203, 213, 225, 0.85)" }}
-                >
-                  No Viva Fresh locations for this selection yet.
-                </Typography>
-              ) : (
-                displayedStores.map((store) => (
-                  <Box
-                    key={store.Department_Code}
-                    sx={{
-                      py: 1.5,
-                      borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
-                      "&:last-of-type": { borderBottom: "none" },
-                    }}
-                  >
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      alignItems="center"
-                      justifyContent="space-between"
-                    >
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                        {store.Department_Name}
-                      </Typography>
-                      <Chip
-                        size="small"
-                        label={store.Format ?? "Unspecified"}
-                        color="warning"
-                        variant="outlined"
-                        sx={{ color: "rgba(250, 204, 21, 0.92)" }}
-                      />
-                    </Stack>
+                <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
+                <Box sx={{ px: 2, py: 2, overflowY: "auto", maxHeight: 240 }}>
+                  {displayedStores.length === 0 ? (
                     <Typography
                       variant="body2"
-                      sx={{ color: "rgba(226, 232, 240, 0.75)", mt: 0.5 }}
+                      sx={{ color: "rgba(203, 213, 225, 0.85)" }}
                     >
-                      {store.Adresse ?? "Address coming soon"}
+                      No Viva Fresh locations for this selection yet.
                     </Typography>
+                  ) : (
+                    displayedStores.map((store) => (
+                      <Box
+                        key={store.Department_Code}
+                        sx={{
+                          py: 1.5,
+                          borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
+                          "&:last-of-type": { borderBottom: "none" },
+                        }}
+                      >
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                          justifyContent="space-between"
+                        >
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                            {store.Department_Name}
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={store.Format ?? "Unspecified"}
+                            color="warning"
+                            variant="outlined"
+                            sx={{ color: "rgba(250, 204, 21, 0.92)" }}
+                          />
+                        </Stack>
+                        <Typography
+                          variant="body2"
+                          sx={{ color: "rgba(226, 232, 240, 0.75)", mt: 0.5 }}
+                        >
+                          {store.Adresse ?? "Address coming soon"}
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color: "rgba(148, 163, 184, 0.75)",
+                            mt: 0.5,
+                            display: "block",
+                          }}
+                        >
+                          {(store.SQM ?? 0).toLocaleString()} m² • {store.Area_Name}
+                          {store.Zone_Name ? ` • ${store.Zone_Name}` : ""}
+                        </Typography>
+                      </Box>
+                    ))
+                  )}
+                  {additionalStoreCount > 0 && (
                     <Typography
                       variant="caption"
                       sx={{
-                        color: "rgba(148, 163, 184, 0.75)",
-                        mt: 0.5,
+                        color: "rgba(148, 163, 184, 0.8)",
                         display: "block",
+                        mt: 1.5,
                       }}
                     >
-                      {(store.SQM ?? 0).toLocaleString()} m² • {store.Area_Name}
-                      {store.Zone_Name ? ` • ${store.Zone_Name}` : ""}
+                      +{additionalStoreCount} additional location(s) in view.
                     </Typography>
-                  </Box>
-                ))
-              )}
-              {additionalStoreCount > 0 && (
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: "rgba(148, 163, 184, 0.8)",
-                    display: "block",
-                    mt: 1.5,
-                  }}
-                >
-                  +{additionalStoreCount} additional location(s) in view.
-                </Typography>
-              )}
-            </Box>
+                  )}
+                </Box>
+              </Box>
+            </Collapse>
           </Paper>
         )}
       </Box>
@@ -3255,7 +3634,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           zIndex: 3,
           width: 240,
           px: 2,
-          py: 1.75,
+          pt: 1.75,
+          pb: legendExpanded ? 1.75 : 1.5,
           borderRadius: 3,
           backgroundColor: "rgba(15, 23, 42, 0.82)",
           border: "1px solid rgba(148, 163, 184, 0.28)",
@@ -3263,92 +3643,213 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           backdropFilter: "blur(10px)",
         }}
       >
-        <Stack direction="row" spacing={1} alignItems="center">
-          <MapOutlined sx={{ fontSize: 18, color: "primary.light" }} />
-          <Typography variant="overline" sx={{ letterSpacing: 0.7 }}>
-            Map legend
-          </Typography>
-        </Stack>
-        <Stack spacing={1.25} sx={{ mt: 1 }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Box
-              sx={{
-                width: 14,
-                height: 14,
-                borderRadius: "50%",
-                bgcolor: "#ef4444",
-                border: "2px solid rgba(248, 250, 252, 0.7)",
-                opacity: 0.85,
-              }}
-            />
-            <Typography
-              variant="body2"
-              sx={{ color: "rgba(226, 232, 240, 0.85)" }}
-            >
-              Viva Fresh stores
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Box
-              sx={{
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                bgcolor: "#f97316",
-                border: "2px solid rgba(255, 255, 255, 0.8)",
-              }}
-            />
-            <Typography
-              variant="body2"
-              sx={{ color: "rgba(226, 232, 240, 0.85)" }}
-            >
-              Focused stores
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Box
-              sx={{
-                width: 14,
-                height: 14,
-                borderRadius: "50%",
-                bgcolor: "#10b981",
-                border: "2px solid rgba(248, 250, 252, 0.7)",
-              }}
-            />
-            <Typography
-              variant="body2"
-              sx={{ color: "rgba(226, 232, 240, 0.85)" }}
-            >
-              Nearby competition
-            </Typography>
-          </Stack>
-          {populationOverlayEnabled && (
-            <Stack spacing={0.75} sx={{ mt: 0.5 }}>
-              <Box
-                sx={{
-                  height: 12,
-                  borderRadius: 999,
-                  background:
-                    "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
-                  border: "1px solid rgba(148, 163, 184, 0.4)",
-                }}
-              />
-              <Typography
-                variant="body2"
-                sx={{ color: "rgba(226, 232, 240, 0.85)" }}
-              >
-                Population density (Kontur grid)
-              </Typography>
-            </Stack>
-          )}
-        </Stack>
-        <Typography
-          variant="caption"
-          sx={{ mt: 1, color: "rgba(148, 163, 184, 0.65)" }}
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          justifyContent="space-between"
         >
-          Zoom in to reveal detailed labels.
-        </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <MapOutlined sx={{ fontSize: 18, color: "primary.light" }} />
+            <Typography variant="overline" sx={{ letterSpacing: 0.7 }}>
+              Map legend
+            </Typography>
+          </Stack>
+          <IconButton
+            size="small"
+            aria-label={
+              legendExpanded ? "Collapse map legend" : "Expand map legend"
+            }
+            aria-expanded={legendExpanded}
+            onClick={() => setLegendExpanded((previous) => !previous)}
+            sx={{
+              ml: 1,
+              bgcolor: "rgba(30, 41, 59, 0.6)",
+              color: "rgba(148, 163, 184, 0.9)",
+              border: "1px solid rgba(148, 163, 184, 0.28)",
+              "&:hover": {
+                bgcolor: "rgba(30, 41, 59, 0.8)",
+              },
+            }}
+          >
+            {legendExpanded ? (
+              <ExpandLess fontSize="small" />
+            ) : (
+              <ExpandMore fontSize="small" />
+            )}
+          </IconButton>
+        </Stack>
+        <Collapse in={legendExpanded} timeout="auto" unmountOnExit>
+          <Box sx={{ mt: 1 }}>
+            <Stack spacing={1.25}>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Box
+                  sx={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    bgcolor: "#ef4444",
+                    border: "2px solid rgba(248, 250, 252, 0.7)",
+                    opacity: 0.85,
+                  }}
+                />
+                <Typography
+                  variant="body2"
+                  sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+                >
+                  Viva Fresh stores
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Box
+                  sx={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    bgcolor: "#f97316",
+                    border: "2px solid rgba(255, 255, 255, 0.8)",
+                  }}
+                />
+                <Typography
+                  variant="body2"
+                  sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+                >
+                  Focused stores
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Box
+                  sx={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    bgcolor: "#10b981",
+                    border: "2px solid rgba(248, 250, 252, 0.7)",
+                  }}
+                />
+                <Typography
+                  variant="body2"
+                  sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+                >
+                  Nearby competition
+                </Typography>
+              </Stack>
+              {populationOverlayEnabled && (
+                <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+                  <Box
+                    sx={{
+                      height: 12,
+                      borderRadius: 999,
+                      background:
+                        "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
+                      border: "1px solid rgba(148, 163, 184, 0.4)",
+                    }}
+                  />
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+                  >
+                    Population density (Kontur grid)
+                  </Typography>
+                </Stack>
+              )}
+            </Stack>
+            <Typography
+              variant="caption"
+              sx={{ mt: 1, color: "rgba(148, 163, 184, 0.65)" }}
+            >
+              Zoom in to reveal detailed labels.
+            </Typography>
+          </Box>
+        </Collapse>
       </Paper>
+
+      {storeHoverDetails && (
+        <Paper
+          elevation={8}
+          sx={{
+            position: "absolute",
+            left: storeHoverDetails.position.left,
+            top: storeHoverDetails.position.top,
+            zIndex: 2,
+            pointerEvents: "none",
+            px: 1.75,
+            py: 1.5,
+            borderRadius: 2,
+            minWidth: 220,
+            maxWidth: 260,
+            backgroundColor: "rgba(15, 23, 42, 0.95)",
+            border: "1px solid rgba(148, 163, 184, 0.45)",
+            color: "rgba(226, 232, 240, 0.95)",
+            backdropFilter: "blur(8px)",
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.4)",
+          }}
+        >
+          <Stack spacing={0.75} sx={{ pointerEvents: "none" }}>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {storeHoverDetails.store.name}
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{ color: "rgba(148, 163, 184, 0.8)" }}
+              >
+                {storeHoverDetails.store.city}
+              </Typography>
+            </Box>
+            <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.9)" }}>
+              Size: {" "}
+              {storeHoverDetails.store.sqm != null
+                ? `${storeHoverDetails.store.sqm.toLocaleString()} m²`
+                : "Not specified"}
+            </Typography>
+            <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.9)" }}>
+              Population: {" "}
+              {storeHoverDetails.population != null
+                ? `${Math.round(storeHoverDetails.population).toLocaleString()} people`
+                : "Data unavailable"}
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "rgba(226, 232, 240, 0.9)", fontWeight: 500 }}
+            >
+              Nearby competition: {" "}
+              {storeHoverDetails.competition.total.toLocaleString()}
+            </Typography>
+            {storeHoverDetails.competition.categories.length > 0 ? (
+              <Stack
+                direction="row"
+                spacing={0.75}
+                sx={{ flexWrap: "wrap", mt: 0.5 }}
+              >
+                {storeHoverDetails.competition.categories.map(
+                  ({ category, label, count }) => (
+                    <Chip
+                      key={category}
+                      size="small"
+                      icon={getCompetitionCategoryIcon(category)}
+                      label={`${label} (${count})`}
+                      sx={{
+                        pointerEvents: "none",
+                        bgcolor: "rgba(30, 41, 59, 0.6)",
+                        color: "rgba(226, 232, 240, 0.92)",
+                        border: "1px solid rgba(148, 163, 184, 0.4)",
+                      }}
+                    />
+                  )
+                )}
+              </Stack>
+            ) : (
+              <Typography
+                variant="caption"
+                sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+              >
+                No nearby competition data yet.
+              </Typography>
+            )}
+          </Stack>
+        </Paper>
+      )}
 
       <Box
         ref={mapContainer}
