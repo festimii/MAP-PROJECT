@@ -1,3 +1,4 @@
+
 import {
   type ChangeEvent,
   useCallback,
@@ -166,7 +167,8 @@ const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
 const POPULATION_SOURCE_ID = "population-density";
 const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
-const POPULATION_DATA_URL = "data/kontur_population.json";
+const POPULATION_DATA_URL = buildApiUrl("/population/grid");
+
 
 const createStoreBaseFilter = (): FilterSpecification =>
   ["!has", "point_count"] as unknown as FilterSpecification;

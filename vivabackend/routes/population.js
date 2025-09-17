@@ -1,10 +1,137 @@
 // routes/population.js
 import { Router } from "express";
 import axios from "axios";
+import path from "path";
+import { fileURLToPath } from "url";
+import { stat } from "fs/promises";
+import { GeoPackageAPI } from "@ngageoint/geopackage";
 import { parsePX } from "../utils/pxParser.js";
 import { getPool } from "../db.js";
 
 const router = Router();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const POPULATION_GPKG_PATH = path.resolve(
+  __dirname,
+  "../../public/data/kontur_population_XK_20231101.gpkg"
+);
+
+const POPULATION_GPKG_TABLE = "population";
+
+let cachedPopulationGeoJSON = null;
+let cachedPopulationMtimeMs = null;
+let populationLoadingPromise = null;
+
+const loadPopulationGeoJSON = async () => {
+  let fileStats;
+  try {
+    fileStats = await stat(POPULATION_GPKG_PATH);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      const missingError = new Error("Population GeoPackage not found");
+      missingError.code = "ENOENT";
+      throw missingError;
+    }
+    throw error;
+  }
+
+  if (
+    cachedPopulationGeoJSON &&
+    cachedPopulationMtimeMs === fileStats.mtimeMs
+  ) {
+    return cachedPopulationGeoJSON;
+  }
+
+  if (!populationLoadingPromise) {
+    populationLoadingPromise = (async () => {
+      const geoPackage = await GeoPackageAPI.open(POPULATION_GPKG_PATH);
+      try {
+        const featureDao = geoPackage.getFeatureDao(POPULATION_GPKG_TABLE);
+        if (!featureDao) {
+          const tableError = new Error(
+            `Feature table "${POPULATION_GPKG_TABLE}" not found in GeoPackage`
+          );
+          tableError.code = "TABLE_NOT_FOUND";
+          throw tableError;
+        }
+
+        const geometryColumnName = featureDao.getGeometryColumnName();
+        const idColumnName = featureDao.idColumns?.[0] ?? null;
+
+        const features = [];
+        const iterator = featureDao.queryForEach();
+        for (
+          let iteratorResult = iterator.next();
+          !iteratorResult.done;
+          iteratorResult = iterator.next()
+        ) {
+          const featureRow = featureDao.getRow(iteratorResult.value);
+          const geometryData = featureRow.geometry;
+
+          if (
+            !geometryData ||
+            geometryData.geometryError ||
+            geometryData.empty
+          ) {
+            continue;
+          }
+
+          const geometry = geometryData.toGeoJSON();
+          if (!geometry) {
+            continue;
+          }
+
+          const properties = {};
+          for (const columnName of featureRow.columnNames) {
+            if (columnName === geometryColumnName) {
+              continue;
+            }
+            if (idColumnName && columnName === idColumnName) {
+              continue;
+            }
+
+            const value = featureRow.getValueWithColumnName(columnName);
+            if (value !== undefined) {
+              properties[columnName] = value;
+            }
+          }
+
+          const featureId =
+            idColumnName !== null
+              ? featureRow.getValueWithColumnName(idColumnName)
+              : undefined;
+
+          features.push({
+            type: "Feature",
+            id:
+              featureId !== undefined && featureId !== null
+                ? featureId
+                : undefined,
+            geometry,
+            properties,
+          });
+        }
+
+        const featureCollection = {
+          type: "FeatureCollection",
+          features,
+        };
+
+        cachedPopulationGeoJSON = featureCollection;
+        cachedPopulationMtimeMs = fileStats.mtimeMs;
+        return featureCollection;
+      } finally {
+        geoPackage.close();
+      }
+    })().finally(() => {
+      populationLoadingPromise = null;
+    });
+  }
+
+  return populationLoadingPromise;
+};
 
 // 🔹 Normalize names to match Storesqm.City_Name
 function normalizeName(name) {
@@ -116,6 +243,21 @@ router.post("/import", async (_req, res) => {
   } catch (err) {
     console.error("❌ Error importing population:", err);
     res.status(500).send("Database error");
+  }
+});
+
+router.get("/grid", async (_req, res) => {
+  try {
+    const populationGeoJSON = await loadPopulationGeoJSON();
+    res.json(populationGeoJSON);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      res.status(404).json({ error: "Population GeoPackage not found" });
+      return;
+    }
+
+    console.error("❌ Error loading population GeoPackage:", error);
+    res.status(500).json({ error: "Failed to load population GeoPackage" });
   }
 });
 // routes/population.js (add this for debugging)
