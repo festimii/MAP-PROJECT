@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 
 import { buildApiUrl } from "../config/apiConfig";
@@ -35,60 +35,64 @@ export const useVivaFreshNetwork = () => {
   const [data, setData] = useState<UseVivaFreshNetworkState>(initialState);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [citiesRes, areasRes, zonesRes] = await Promise.all([
+        axios.get<City[]>(buildApiUrl("/cities")),
+        axios.get<RawAreaResponse[]>(buildApiUrl("/areas/filters")),
+        axios.get<RawZoneRecord[]>(buildApiUrl("/zones")),
+      ]);
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      const processed = buildVivaNetworkData(
+        citiesRes.data,
+        areasRes.data,
+        zonesRes.data
+      );
+
+      setData({
+        cities: citiesRes.data,
+        ...processed,
+      });
+      setLastUpdated(new Date().toISOString());
+    } catch (err) {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      console.error("Failed to load Viva Fresh data", err);
+      setError(DATA_ERROR_MESSAGE);
+      setData(initialState);
+      setLastUpdated(null);
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadData = async () => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const [citiesRes, areasRes, zonesRes] = await Promise.all([
-          axios.get<City[]>(buildApiUrl("/cities")),
-          axios.get<RawAreaResponse[]>(buildApiUrl("/areas/filters")),
-          axios.get<RawZoneRecord[]>(buildApiUrl("/zones")),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        const processed = buildVivaNetworkData(
-          citiesRes.data,
-          areasRes.data,
-          zonesRes.data
-        );
-
-        if (!cancelled) {
-          setData({
-            cities: citiesRes.data,
-            ...processed,
-          });
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("Failed to load Viva Fresh data", err);
-          setError(DATA_ERROR_MESSAGE);
-          setData(initialState);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
     loadData();
 
     return () => {
-      cancelled = true;
+      isMountedRef.current = false;
     };
-  }, []);
+  }, [loadData]);
 
   return {
     ...data,
     loading,
     error,
+    lastUpdated,
+    reload: loadData,
   };
 };
