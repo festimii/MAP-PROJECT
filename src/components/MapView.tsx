@@ -11,10 +11,8 @@ import {
   Button,
   Chip,
   Divider,
-  Grid,
   FormControl,
   InputLabel,
-  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -27,14 +25,7 @@ import {
   MapOutlined,
   TravelExplore,
   Tune,
-  Groups,
-  Paid,
-  ShoppingBag,
-  Speed,
-  TrendingUp,
-  Insights,
 } from "@mui/icons-material";
-import type { SvgIconComponent } from "@mui/icons-material";
 
 import { buildApiUrl } from "../config/apiConfig";
 import type { MapSelection, StoreData } from "../models/map";
@@ -106,26 +97,6 @@ type SubZoneFeatureProperties = {
 };
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
-
-type PremiumKpi = {
-  label: string;
-  value: string;
-  helper: string;
-  trend: string;
-  icon: SvgIconComponent;
-};
-
-type OperationalMetric = {
-  label: string;
-  value: string;
-  helper: string;
-};
-
-type GrowthSignal = {
-  label: string;
-  value: number;
-  helper: string;
-};
 
 type MapViewProps = {
   selection: MapSelection | null;
@@ -1633,105 +1604,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       : 0
     : 0;
 
-  const premiumKpis = useMemo<PremiumKpi[]>(() => {
-    if (!selectionSummary) {
-      return [];
-    }
-
-    return [
-      {
-        label: "Population reach",
-        value: "128K residents",
-        helper: "Within 15 min drive time",
-        trend: "+3.2% YoY",
-        icon: Groups,
-      },
-      {
-        label: "Avg. household income",
-        value: "€1,180",
-        helper: "Median monthly earnings",
-        trend: "+1.1% YoY",
-        icon: Paid,
-      },
-      {
-        label: "Retail spending index",
-        value: "112",
-        helper: "Kosovo baseline = 100",
-        trend: "+4 pts YoY",
-        icon: Insights,
-      },
-      {
-        label: "Basket conversion",
-        value: "68%",
-        helper: "Shoppers visiting weekly",
-        trend: "+5% vs LY",
-        icon: ShoppingBag,
-      },
-    ];
-  }, [selectionSummary]);
-
-  const operationalMetrics = useMemo<OperationalMetric[]>(() => {
-    if (!selectionSummary) {
-      return [];
-    }
-
-    const averageSize =
-      selectionSummary.storeCount > 0
-        ? Math.round(selectionSummary.totalSQM / selectionSummary.storeCount)
-        : 0;
-
-    const leadingFormat = selectionSummary.topFormats[0]
-      ? `${selectionSummary.topFormats[0].format} · ${selectionSummary.topFormats[0].count} sites`
-      : "Format mix pending";
-
-    return [
-      {
-        label: "Active stores",
-        value: selectionSummary.storeCount.toLocaleString(),
-        helper: leadingFormat,
-      },
-      {
-        label: "Total SQM",
-        value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
-        helper: "Aggregate mapped sales area",
-      },
-      {
-        label: "Geo coverage",
-        value: `${geoCoveragePercent}%`,
-        helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
-      },
-      {
-        label: "Avg. store size",
-        value: averageSize ? `${averageSize.toLocaleString()} m²` : "—",
-        helper: "Mean footprint across locations",
-      },
-    ];
-  }, [selectionSummary, geoCoveragePercent]);
-
-  const growthSignals = useMemo<GrowthSignal[]>(() => {
-    if (!selectionSummary) {
-      return [];
-    }
-
-    return [
-      {
-        label: "Projected revenue uplift",
-        value: 72,
-        helper: "Scenario vs last year",
-      },
-      {
-        label: "Household penetration outlook",
-        value: 58,
-        helper: "12-month pipeline",
-      },
-      {
-        label: "Operational readiness score",
-        value: 84,
-        helper: "Team & supply chain status",
-      },
-    ];
-  }, [selectionSummary]);
-
   const handleCategoryChange = (event: SelectChangeEvent<string>) => {
     categorySelectionWasUserDriven.current = true;
     setSelectedCategory(event.target.value);
@@ -1871,36 +1743,19 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             }}
           >
             <Box sx={{ p: 2.5, pb: 2 }}>
-              <Stack
-                direction={{ xs: "column", sm: "row" }}
-                spacing={1}
-                alignItems={{ xs: "flex-start", sm: "center" }}
-                justifyContent="space-between"
-              >
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
-                  <Typography
-                    variant="overline"
-                    sx={{
-                      letterSpacing: 0.8,
-                      color: "rgba(148, 163, 184, 0.85)",
-                    }}
-                  >
-                    {selectionSummary.focusLabel}
-                  </Typography>
-                </Stack>
-                <Chip
-                  label="Performance view"
-                  size="small"
+              <Stack direction="row" spacing={1} alignItems="center">
+                <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
+                <Typography
+                  variant="overline"
                   sx={{
-                    bgcolor: "rgba(59, 130, 246, 0.18)",
-                    color: "rgba(191, 219, 254, 0.9)",
-                    borderColor: "rgba(59, 130, 246, 0.35)",
+                    letterSpacing: 0.8,
+                    color: "rgba(148, 163, 184, 0.85)",
                   }}
-                  variant="outlined"
-                />
+                >
+                  {selectionSummary.focusLabel}
+                </Typography>
               </Stack>
-              <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.75 }}>
+              <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
                 {selectionSummary.label}
               </Typography>
               {selectionSummary.mode === "city" && (
@@ -1970,262 +1825,62 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     </Stack>
                   </Box>
                 )}
-              <Box
-                sx={{
-                  mt: 2,
-                  p: 2,
-                  borderRadius: 2,
-                  background:
-                    "linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 116, 144, 0.12))",
-                  border: "1px solid rgba(96, 165, 250, 0.25)",
-                }}
-              >
-                <Stack spacing={1.2}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                    Strategic insight
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{ color: "rgba(226, 232, 240, 0.82)" }}
-                  >
-                    {selectionSummary.label} shows strong catchment fundamentals
-                    with accelerating footfall potential and solid loyalty depth.
-                  </Typography>
-                  <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-                    <Chip
-                      icon={<TrendingUp sx={{ fontSize: 16 }} />}
-                      label="Expansion ready"
-                      size="small"
-                      sx={{
-                        bgcolor: "rgba(59, 130, 246, 0.18)",
-                        color: "rgba(191, 219, 254, 0.92)",
-                        borderColor: "rgba(59, 130, 246, 0.4)",
-                      }}
-                      variant="outlined"
-                    />
-                    <Chip
-                      icon={<Speed sx={{ fontSize: 16 }} />}
-                      label="Avg. drive time 12 min"
-                      size="small"
-                      sx={{
-                        bgcolor: "rgba(14, 165, 233, 0.15)",
-                        color: "rgba(165, 243, 252, 0.95)",
-                        borderColor: "rgba(14, 165, 233, 0.35)",
-                      }}
-                      variant="outlined"
-                    />
-                  </Stack>
-                </Stack>
-              </Box>
-              {selectionSummary.topFormats.length > 0 && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography
-                    variant="overline"
-                    sx={{
-                      letterSpacing: 0.7,
-                      color: "rgba(148, 163, 184, 0.75)",
-                    }}
-                  >
-                    Leading store formats
-                  </Typography>
-                  <Stack
-                    direction="row"
-                    spacing={1}
-                    sx={{ flexWrap: "wrap", mt: 0.75 }}
-                  >
-                    {selectionSummary.topFormats.map(({ format, count }) => (
-                      <Chip
-                        key={format}
-                        size="small"
-                        label={`${format} • ${count}`}
-                        sx={{
-                          borderColor: "rgba(148, 163, 184, 0.4)",
-                          color: "rgba(226, 232, 240, 0.9)",
-                        }}
-                        variant="outlined"
-                      />
-                    ))}
-                  </Stack>
-                </Box>
-              )}
             </Box>
             <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
             <Box sx={{ p: 2, pt: 1.5 }}>
-              <Typography
-                variant="overline"
-                sx={{
-                  letterSpacing: 0.7,
-                  color: "rgba(148, 163, 184, 0.75)",
-                }}
-              >
-                Key market KPIs
-              </Typography>
-              <Grid container spacing={1.5} sx={{ mt: 1 }}>
-                {premiumKpis.map(({ label, value, helper, trend, icon: Icon }) => (
-                  <Grid item xs={12} sm={6} key={label}>
-                    <Box
-                      sx={{
-                        height: "100%",
-                        p: 1.75,
-                        borderRadius: 2,
-                        border: "1px solid rgba(148, 163, 184, 0.25)",
-                        bgcolor: "rgba(30, 41, 59, 0.6)",
-                      }}
-                    >
-                      <Stack direction="row" spacing={1.5} alignItems="flex-start">
-                        <Box
-                          sx={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: "50%",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            bgcolor: "rgba(59, 130, 246, 0.16)",
-                            border: "1px solid rgba(59, 130, 246, 0.35)",
-                          }}
-                        >
-                          <Icon sx={{ fontSize: 20, color: "rgba(191, 219, 254, 0.9)" }} />
-                        </Box>
-                        <Box>
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              color: "rgba(191, 219, 254, 0.7)",
-                              letterSpacing: 0.6,
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            {label}
-                          </Typography>
-                          <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.25 }}>
-                            {value}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(148, 163, 184, 0.75)", display: "block", mt: 0.5 }}
-                          >
-                            {helper}
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(16, 185, 129, 0.85)", display: "block", mt: 0.25 }}
-                          >
-                            {trend}
-                          </Typography>
-                        </Box>
-                      </Stack>
-                    </Box>
-                  </Grid>
-                ))}
-              </Grid>
-              <Box sx={{ mt: 2.5 }}>
-                <Typography
-                  variant="overline"
-                  sx={{
-                    letterSpacing: 0.7,
-                    color: "rgba(148, 163, 184, 0.75)",
-                  }}
-                >
-                  Operational metrics
-                </Typography>
-                <Grid container spacing={1.5} sx={{ mt: 1 }}>
-                  {operationalMetrics.map(({ label, value, helper }) => (
-                    <Grid item xs={12} sm={6} key={label}>
-                      <Box
-                        sx={{
-                          height: "100%",
-                          p: 1.75,
-                          borderRadius: 2,
-                          border: "1px solid rgba(148, 163, 184, 0.25)",
-                          bgcolor: "rgba(15, 23, 42, 0.6)",
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            color: "rgba(191, 219, 254, 0.7)",
-                            letterSpacing: 0.6,
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          {label}
-                        </Typography>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 600, mt: 0.25 }}>
-                          {value}
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{ color: "rgba(148, 163, 184, 0.75)", display: "block", mt: 0.5 }}
-                        >
-                          {helper}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  ))}
-                </Grid>
-              </Box>
-              {growthSignals.length > 0 && (
-                <Box sx={{ mt: 2.5 }}>
-                  <Typography
-                    variant="overline"
+              <Stack direction="row" spacing={1.25} sx={{ flexWrap: "wrap" }}>
+                {[
+                  {
+                    label: "Stores",
+                    value: selectionSummary.storeCount.toLocaleString(),
+                  },
+                  {
+                    label: "Total SQM",
+                    value: `${selectionSummary.totalSQM.toLocaleString()} m²`,
+                  },
+                  {
+                    label: "Geo coverage",
+                    value: `${geoCoveragePercent}%`,
+                    helper: `${selectionSummary.geocodedCount.toLocaleString()} geocoded`,
+                  },
+                ].map(({ label, value, helper }) => (
+                  <Box
+                    key={label}
                     sx={{
-                      letterSpacing: 0.7,
-                      color: "rgba(148, 163, 184, 0.75)",
+                      flex: "1 1 120px",
+                      px: 1.5,
+                      py: 1.25,
+                      borderRadius: 2,
+                      border: "1px solid rgba(148, 163, 184, 0.25)",
+                      bgcolor: "rgba(30, 41, 59, 0.55)",
                     }}
                   >
-                    Growth signals
-                  </Typography>
-                  <Stack spacing={1.5} sx={{ mt: 1 }}>
-                    {growthSignals.map(({ label, value, helper }) => (
-                      <Box key={label}>
-                        <Stack
-                          direction="row"
-                          alignItems="center"
-                          justifyContent="space-between"
-                        >
-                          <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.88)" }}>
-                            {label}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: "rgba(148, 163, 184, 0.75)" }}>
-                            {value}%
-                          </Typography>
-                        </Stack>
-                        <LinearProgress
-                          variant="determinate"
-                          value={value}
-                          sx={{
-                            mt: 0.75,
-                            height: 6,
-                            borderRadius: 9999,
-                            backgroundColor: "rgba(30, 41, 59, 0.8)",
-                            "& .MuiLinearProgress-bar": {
-                              borderRadius: 9999,
-                              background: "linear-gradient(90deg, #22d3ee, #60a5fa)",
-                            },
-                          }}
-                        />
-                        <Typography
-                          variant="caption"
-                          sx={{ color: "rgba(148, 163, 184, 0.7)", display: "block", mt: 0.5 }}
-                        >
-                          {helper}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Box>
-              )}
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: "rgba(191, 219, 254, 0.7)",
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {label}
+                    </Typography>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                      {value}
+                    </Typography>
+                    {helper && (
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                      >
+                        {helper}
+                      </Typography>
+                    )}
+                  </Box>
+                ))}
+              </Stack>
               {selectionCompetition && (
-                <Box
-                  sx={{
-                    mt: 2.5,
-                    p: 2,
-                    borderRadius: 2,
-                    border: "1px solid rgba(16, 185, 129, 0.3)",
-                    bgcolor: "rgba(15, 118, 110, 0.22)",
-                  }}
-                >
+                <Box sx={{ mt: 2 }}>
                   <Typography
                     variant="subtitle2"
                     sx={{ fontWeight: 600, color: "rgba(167, 243, 208, 0.95)" }}
@@ -2271,38 +1926,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             </Box>
             <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
             <Box sx={{ px: 2, py: 2, overflowY: "auto", maxHeight: 240 }}>
-              <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-              >
-                <Typography
-                  variant="overline"
-                  sx={{
-                    letterSpacing: 0.7,
-                    color: "rgba(148, 163, 184, 0.75)",
-                  }}
-                >
-                  Viva Fresh locations
-                </Typography>
-                <Chip
-                  size="small"
-                  label={`${selectionSummary.storeCount.toLocaleString()} total`}
-                  sx={{
-                    bgcolor: "rgba(59, 130, 246, 0.15)",
-                    color: "rgba(191, 219, 254, 0.9)",
-                    borderColor: "rgba(59, 130, 246, 0.35)",
-                  }}
-                  variant="outlined"
-                />
-              </Stack>
-              <Typography
-                variant="caption"
-                sx={{ color: "rgba(148, 163, 184, 0.7)", display: "block", mt: 0.75 }}
-              >
-                Detailed roster ready for quick due diligence and deployment planning.
-              </Typography>
-              <Divider sx={{ mt: 1.5, mb: 1.25, borderColor: "rgba(148, 163, 184, 0.12)" }} />
               {displayedStores.length === 0 ? (
                 <Typography
                   variant="body2"
