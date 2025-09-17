@@ -206,6 +206,9 @@ export default function App() {
                     display: "flex",
                     flexDirection: "column",
                     gap: 0.5,
+                    alignItems: "center", // ✅ center horizontally
+                    justifyContent: "center", // ✅ center vertically if needed
+                    textAlign: "center", // ✅ center text inside
                   }}
                 >
                   <Typography
@@ -218,7 +221,7 @@ export default function App() {
                   >
                     {label}
                   </Typography>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 400 }}>
                     {value}
                   </Typography>
                   {helper && (
