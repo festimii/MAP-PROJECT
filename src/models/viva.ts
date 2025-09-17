@@ -36,6 +36,8 @@ export interface RawAreaResponse {
 export interface RawZoneRecord {
   Zone_Code: string | null;
   Zone_Name: string;
+  Department_Code: string | null;
+  Department_Name: string | null;
   Area_Code: string | null;
   Area_Name: string;
   City_Name: string | null;
