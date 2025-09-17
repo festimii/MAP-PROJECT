@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import maplibregl, { Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
@@ -18,7 +25,9 @@ import {
   MenuItem,
   Paper,
   Select,
+  Slider,
   Stack,
+  Switch,
   Typography,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material/Select";
@@ -89,6 +98,12 @@ type BusinessProperties = {
   cityName?: string;
 };
 
+type PopulationFeatureProperties = {
+  id?: string | number;
+  population?: number;
+  population_density?: number;
+};
+
 type StoreFocus = {
   department: string;
   coordinates: [number, number];
@@ -126,6 +141,12 @@ type SelectionKpiData = {
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
 
+type PopulationOverlayStats = {
+  cellCount: number;
+  totalPopulation: number;
+  maxPopulation: number;
+};
+
 type MapViewProps = {
   selection: MapSelection | null;
   cities: City[];
@@ -142,6 +163,11 @@ const humanizeCategory = (value: string) =>
 const DEFAULT_COMPETITION_CATEGORY = "all";
 const STORE_LABEL_VISIBILITY_ZOOM = 13;
 const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
+const POPULATION_SOURCE_ID = "population-density";
+const POPULATION_FILL_LAYER_ID = "population-density-fill";
+const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
+const POPULATION_DATA_URL =
+  "/data/kontur_population_XK_20231101_sample.geojson";
 
 const createStoreBaseFilter = (): FilterSpecification =>
   ["!has", "point_count"] as unknown as FilterSpecification;
@@ -401,6 +427,20 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [storesData, setStoresData] = useState<StoreData[]>(stores ?? []);
   const initialStoresRef = useRef<StoreData[] | undefined>(stores);
   const previousSelectionHadValue = useRef(false);
+  const [populationOverlayEnabled, setPopulationOverlayEnabled] =
+    useState(false);
+  const [populationOverlayLoading, setPopulationOverlayLoading] =
+    useState(false);
+  const [populationOverlayError, setPopulationOverlayError] =
+    useState<string | null>(null);
+  const [populationOverlayAvailable, setPopulationOverlayAvailable] =
+    useState(false);
+  const [populationOverlayOpacity, setPopulationOverlayOpacity] =
+    useState(0.6);
+  const [populationOverlayStats, setPopulationOverlayStats] =
+    useState<PopulationOverlayStats | null>(null);
+  const populationOverlayEnabledRef = useRef(populationOverlayEnabled);
+  const populationOverlayOpacityRef = useRef(populationOverlayOpacity);
 
   const filterBusinessFeaturesBySelection = useCallback(
     (
@@ -1030,6 +1070,118 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           },
         });
 
+        setPopulationOverlayAvailable(false);
+        setPopulationOverlayError(null);
+        setPopulationOverlayLoading(true);
+        try {
+          const populationResponse = await fetch(POPULATION_DATA_URL);
+          if (!populationResponse.ok) {
+            throw new Error(
+              `Failed to load population data (${populationResponse.status})`
+            );
+          }
+
+          const populationData =
+            (await populationResponse.json()) as GeoJSON.FeatureCollection<
+              GeoJSON.Polygon | GeoJSON.MultiPolygon,
+              PopulationFeatureProperties
+            >;
+
+          map.addSource(POPULATION_SOURCE_ID, {
+            type: "geojson",
+            data: populationData,
+          });
+
+          map.addLayer(
+            {
+              id: POPULATION_FILL_LAYER_ID,
+              type: "fill",
+              source: POPULATION_SOURCE_ID,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+              },
+              paint: {
+                "fill-color": [
+                  "interpolate",
+                  ["linear"],
+                  ["coalesce", ["get", "population"], 0],
+                  0,
+                  "rgba(15, 23, 42, 0)",
+                  200,
+                  "#fef3c7",
+                  600,
+                  "#fde68a",
+                  1200,
+                  "#fbbf24",
+                  2000,
+                  "#f97316",
+                  3500,
+                  "#c2410c",
+                ] as unknown as ExpressionSpecification,
+                "fill-opacity": populationOverlayEnabledRef.current
+                  ? populationOverlayOpacityRef.current
+                  : 0,
+                "fill-outline-color": "rgba(17, 24, 39, 0.2)",
+              },
+            },
+            "city-boundaries"
+          );
+
+          map.addLayer(
+            {
+              id: POPULATION_OUTLINE_LAYER_ID,
+              type: "line",
+              source: POPULATION_SOURCE_ID,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+              },
+              paint: {
+                "line-color": "rgba(15, 23, 42, 0.35)",
+                "line-width": 0.6,
+              },
+            },
+            "city-boundaries"
+          );
+
+          if (isMounted) {
+            const stats = populationData.features.reduce(
+              (acc, feature) => {
+                const population = Number(feature.properties?.population) || 0;
+                return {
+                  cellCount: acc.cellCount + 1,
+                  totalPopulation: acc.totalPopulation + population,
+                  maxPopulation: Math.max(acc.maxPopulation, population),
+                };
+              },
+              { cellCount: 0, totalPopulation: 0, maxPopulation: 0 }
+            );
+
+            setPopulationOverlayStats(stats);
+            setPopulationOverlayAvailable(true);
+            setPopulationOverlayError(null);
+          }
+        } catch (populationError) {
+          console.error(
+            "Failed to load population density overlay:",
+            populationError
+          );
+          if (isMounted) {
+            setPopulationOverlayError(
+              "Population density overlay could not be loaded."
+            );
+            setPopulationOverlayAvailable(false);
+            setPopulationOverlayStats(null);
+          }
+        } finally {
+          if (isMounted) {
+            setPopulationOverlayLoading(false);
+          }
+        }
+
         // --- Store points ---
         let storesForSource = initialStoresRef.current ?? [];
 
@@ -1494,6 +1646,33 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     updateBusinessSource(map, selectedCategory);
   }, [selectedCategory, updateBusinessSource]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!map.getLayer(POPULATION_FILL_LAYER_ID)) {
+      return;
+    }
+
+    const visibility = populationOverlayEnabled ? "visible" : "none";
+    map.setLayoutProperty(POPULATION_FILL_LAYER_ID, "visibility", visibility);
+    map.setPaintProperty(
+      POPULATION_FILL_LAYER_ID,
+      "fill-opacity",
+      populationOverlayEnabled ? populationOverlayOpacity : 0
+    );
+
+    if (map.getLayer(POPULATION_OUTLINE_LAYER_ID)) {
+      map.setLayoutProperty(
+        POPULATION_OUTLINE_LAYER_ID,
+        "visibility",
+        visibility
+      );
+    }
+  }, [populationOverlayEnabled, populationOverlayOpacity]);
+
   const selectionCompetition = useMemo(() => {
     if (!selection) {
       return null;
@@ -1770,6 +1949,29 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     setSelectedCategory(event.target.value);
   };
 
+  const handlePopulationOverlayToggle = (
+    _event: ChangeEvent<HTMLInputElement>,
+    checked: boolean
+  ) => {
+    setPopulationOverlayEnabled(checked);
+  };
+
+  const handlePopulationOpacityChange = (
+    _event: Event,
+    value: number | number[]
+  ) => {
+    const numericValue = Array.isArray(value) ? value[0] : value;
+    setPopulationOverlayOpacity(Math.max(0, Math.min(1, numericValue / 100)));
+  };
+
+  useEffect(() => {
+    populationOverlayEnabledRef.current = populationOverlayEnabled;
+  }, [populationOverlayEnabled]);
+
+  useEffect(() => {
+    populationOverlayOpacityRef.current = populationOverlayOpacity;
+  }, [populationOverlayOpacity]);
+
   return (
     <Box sx={{ position: "relative", width: "100%", height: "100%" }}>
       <Box
@@ -1795,6 +1997,146 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             maxWidth: { xs: "100%", sm: 280 },
           }}
         >
+          <Paper
+            elevation={8}
+            sx={{
+              px: 2,
+              py: 1.75,
+              borderRadius: 3,
+              backgroundColor: "rgba(15, 23, 42, 0.86)",
+              border: "1px solid rgba(148, 163, 184, 0.3)",
+              color: "rgba(226, 232, 240, 0.95)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Bolt sx={{ fontSize: 18, color: "primary.light" }} />
+              <Typography
+                variant="overline"
+                sx={{ letterSpacing: 0.7, color: "rgba(148, 163, 184, 0.8)" }}
+              >
+                Population density
+              </Typography>
+            </Stack>
+            {populationOverlayLoading ? (
+              <Box sx={{ mt: 2 }}>
+                <LinearProgress color="primary" />
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: "block",
+                    mt: 1,
+                    color: "rgba(148, 163, 184, 0.75)",
+                  }}
+                >
+                  Loading Kontur population grid…
+                </Typography>
+              </Box>
+            ) : (
+              <>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ mt: 1.5 }}
+                >
+                  <Typography
+                    variant="body2"
+                    sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+                  >
+                    Overlay visibility
+                  </Typography>
+                  <Switch
+                    size="small"
+                    checked={populationOverlayEnabled}
+                    onChange={handlePopulationOverlayToggle}
+                    disabled={!populationOverlayAvailable}
+                  />
+                </Stack>
+                {populationOverlayError ? (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      mt: 1,
+                      display: "block",
+                      color: "rgba(248, 113, 113, 0.9)",
+                    }}
+                  >
+                    {populationOverlayError}
+                  </Typography>
+                ) : (
+                  <>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        mt: 1,
+                        display: "block",
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      {populationOverlayStats
+                        ? `${populationOverlayStats.cellCount.toLocaleString()} grid cells · ${Math.round(populationOverlayStats.totalPopulation).toLocaleString()} people total`
+                        : "Toggle to reveal Kontur population intensity."}
+                    </Typography>
+                    <Box
+                      sx={{
+                        mt: 1.5,
+                        height: 12,
+                        borderRadius: 999,
+                        background:
+                          "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
+                        border: "1px solid rgba(148, 163, 184, 0.4)",
+                      }}
+                    />
+                    <Stack
+                      direction="row"
+                      justifyContent="space-between"
+                      sx={{ mt: 0.5 }}
+                    >
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "rgba(148, 163, 184, 0.7)" }}
+                      >
+                        Lower
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: "rgba(148, 163, 184, 0.7)" }}
+                      >
+                        Higher
+                      </Typography>
+                    </Stack>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        mt: 1.5,
+                        display: "block",
+                        color: "rgba(148, 163, 184, 0.75)",
+                      }}
+                    >
+                      Opacity
+                    </Typography>
+                    <Slider
+                      size="small"
+                      value={Math.round(populationOverlayOpacity * 100)}
+                      onChange={handlePopulationOpacityChange}
+                      step={5}
+                      min={20}
+                      max={100}
+                      disabled={!populationOverlayEnabled}
+                      sx={{
+                        mt: 0.5,
+                        color: "#f97316",
+                        '& .MuiSlider-thumb': {
+                          boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.25)",
+                        },
+                      }}
+                    />
+                  </>
+                )}
+              </>
+            )}
+          </Paper>
           {businessCategories.length > 0 && (
             <Paper
               elevation={8}
@@ -2570,6 +2912,25 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               Nearby competition
             </Typography>
           </Stack>
+          {populationOverlayEnabled && (
+            <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+              <Box
+                sx={{
+                  height: 12,
+                  borderRadius: 999,
+                  background:
+                    "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
+                  border: "1px solid rgba(148, 163, 184, 0.4)",
+                }}
+              />
+              <Typography
+                variant="body2"
+                sx={{ color: "rgba(226, 232, 240, 0.85)" }}
+              >
+                Population density (Kontur grid)
+              </Typography>
+            </Stack>
+          )}
         </Stack>
         <Typography
           variant="caption"
