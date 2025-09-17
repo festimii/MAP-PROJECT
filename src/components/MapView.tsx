@@ -7,13 +7,14 @@ import {
   useRef,
   useState,
 } from "react";
-import maplibregl, { Map as MapLibreMap } from "maplibre-gl";
+import maplibregl, { Map as MapLibreMap, type MapGeoJSONFeature } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
 import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
+import { area as turfArea } from "@turf/turf";
 import {
   Avatar,
   Box,
@@ -103,6 +104,7 @@ type PopulationFeatureProperties = {
   id?: string | number;
   population?: number;
   population_density?: number;
+  __overlayId?: number;
 };
 
 type StoreFocus = {
@@ -154,6 +156,14 @@ type MapViewProps = {
   stores?: StoreData[];
 };
 
+type PopulationHoverInfo = {
+  overlayId: number;
+  population: number;
+  density: number | null;
+  areaKm2: number;
+  lngLat: [number, number];
+};
+
 const humanizeCategory = (value: string) =>
   value
     .split(/[_-]/)
@@ -167,6 +177,7 @@ const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
 const POPULATION_SOURCE_ID = "population-density";
 const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
+const POPULATION_HOVER_LAYER_ID = "population-density-hover";
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
 
 const WEB_MERCATOR_RADIUS = 6378137;
@@ -236,11 +247,17 @@ const normalizePopulationCollection = (
     PopulationFeatureProperties
   >
 ) => {
-  let convertedAny = false;
+  const features = collection.features.map((feature, index) => {
+    const baseProperties: PopulationFeatureProperties = {
+      ...(feature.properties ?? {}),
+      __overlayId: index,
+    };
 
-  const features = collection.features.map((feature) => {
     if (!feature.geometry) {
-      return feature;
+      return {
+        ...feature,
+        properties: baseProperties,
+      };
     }
 
     const { geometry, converted } = convertPopulationGeometryToLonLat(
@@ -248,25 +265,46 @@ const normalizePopulationCollection = (
     );
 
     if (!converted) {
-      return feature;
+      return {
+        ...feature,
+        properties: baseProperties,
+      };
     }
 
-    convertedAny = true;
     return {
       ...feature,
       geometry,
+      properties: baseProperties,
     };
   });
-
-  if (!convertedAny) {
-    return collection;
-  }
 
   return {
     ...collection,
     features,
   };
 };
+
+const createPopulationOpacityExpression = (
+  enabled: boolean,
+  opacity: number
+) =>
+  [
+    "*",
+    enabled ? Math.max(0, Math.min(1, opacity)) : 0,
+    [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      6,
+      0.18,
+      9,
+      0.35,
+      11,
+      0.65,
+      13.5,
+      1,
+    ],
+  ] as unknown as ExpressionSpecification;
 
 
 const createStoreBaseFilter = (): FilterSpecification =>
@@ -536,6 +574,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [populationOverlayOpacity, setPopulationOverlayOpacity] = useState(0.6);
   const [populationOverlayStats, setPopulationOverlayStats] =
     useState<PopulationOverlayStats | null>(null);
+  const [populationHoverInfo, setPopulationHoverInfo] =
+    useState<PopulationHoverInfo | null>(null);
   const populationOverlayEnabledRef = useRef(populationOverlayEnabled);
   const populationOverlayOpacityRef = useRef(populationOverlayOpacity);
 
@@ -1206,25 +1246,32 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               paint: {
                 "fill-color": [
                   "interpolate",
-                  ["linear"],
-                  ["coalesce", ["get", "population"], 0],
+                  ["exponential", 1.15],
+                  [
+                    "coalesce",
+                    ["get", "population_density"],
+                    ["get", "population"],
+                  ],
                   0,
                   "rgba(15, 23, 42, 0)",
+                  75,
+                  "#fefce8",
                   200,
-                  "#fef3c7",
-                  600,
                   "#fde68a",
+                  500,
+                  "#facc15",
                   1200,
-                  "#fbbf24",
-                  2000,
                   "#f97316",
-                  3500,
-                  "#c2410c",
+                  2200,
+                  "#ea580c",
+                  3600,
+                  "#9a3412",
                 ] as unknown as ExpressionSpecification,
-                "fill-opacity": populationOverlayEnabledRef.current
-                  ? populationOverlayOpacityRef.current
-                  : 0,
-                "fill-outline-color": "rgba(17, 24, 39, 0.2)",
+                "fill-opacity": createPopulationOpacityExpression(
+                  populationOverlayEnabledRef.current,
+                  populationOverlayOpacityRef.current
+                ),
+                "fill-outline-color": "rgba(17, 24, 39, 0.18)",
               },
             },
             "city-boundaries"
@@ -1241,12 +1288,143 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   : "none",
               },
               paint: {
-                "line-color": "rgba(15, 23, 42, 0.35)",
+                "line-color": "rgba(15, 23, 42, 0.3)",
                 "line-width": 0.6,
               },
             },
             "city-boundaries"
           );
+
+          map.addLayer(
+            {
+              id: POPULATION_HOVER_LAYER_ID,
+              type: "line",
+              source: POPULATION_SOURCE_ID,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+              },
+              paint: {
+                "line-color": "rgba(248, 250, 252, 0.95)",
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  7,
+                  0.8,
+                  11,
+                  1.6,
+                  14,
+                  2.4,
+                ],
+                "line-opacity": 0.85,
+              },
+              filter: [
+                "==",
+                ["get", "__overlayId"],
+                -1,
+              ] as unknown as ExpressionSpecification,
+            },
+            POPULATION_OUTLINE_LAYER_ID
+          );
+
+          let hoveredPopulationId: number | null = null;
+
+          const clearPopulationHover = () => {
+            if (hoveredPopulationId !== null && map.getLayer(POPULATION_HOVER_LAYER_ID)) {
+              map.setFilter(
+                POPULATION_HOVER_LAYER_ID,
+                [
+                  "==",
+                  ["get", "__overlayId"],
+                  -1,
+                ] as unknown as ExpressionSpecification
+              );
+            }
+            hoveredPopulationId = null;
+            map.getCanvas().style.cursor = "";
+            if (isMounted) {
+              setPopulationHoverInfo(null);
+            }
+          };
+
+          const handlePopulationMove = (
+            event: maplibregl.MapLayerMouseEvent & {
+              features?: MapGeoJSONFeature[];
+            }
+          ) => {
+            if (!populationOverlayEnabledRef.current) {
+              clearPopulationHover();
+              return;
+            }
+
+            const feature = event.features?.[0];
+            if (!feature || !feature.geometry) {
+              clearPopulationHover();
+              return;
+            }
+
+            const overlayIdRaw =
+              (feature.properties?.__overlayId as number | undefined) ?? null;
+            if (overlayIdRaw === null) {
+              clearPopulationHover();
+              return;
+            }
+
+            if (hoveredPopulationId !== overlayIdRaw && map.getLayer(POPULATION_HOVER_LAYER_ID)) {
+              map.setFilter(
+                POPULATION_HOVER_LAYER_ID,
+                [
+                  "==",
+                  ["get", "__overlayId"],
+                  overlayIdRaw,
+                ] as unknown as ExpressionSpecification
+              );
+            }
+
+            hoveredPopulationId = overlayIdRaw;
+            map.getCanvas().style.cursor = "crosshair";
+
+            const geometry = feature.geometry as
+              | GeoJSON.Polygon
+              | GeoJSON.MultiPolygon;
+            const wrappedFeature: GeoJSON.Feature<
+              GeoJSON.Polygon | GeoJSON.MultiPolygon,
+              PopulationFeatureProperties
+            > = {
+              type: "Feature",
+              geometry,
+              properties: feature.properties as PopulationFeatureProperties,
+            };
+
+            const areaSqMeters = turfArea(wrappedFeature);
+            const areaKm2 = areaSqMeters / 1_000_000;
+            const population = Number(feature.properties?.population) || 0;
+            const densityRaw =
+              feature.properties?.population_density !== undefined
+                ? Number(feature.properties.population_density)
+                : null;
+            const density =
+              densityRaw !== null && !Number.isNaN(densityRaw)
+                ? densityRaw
+                : areaKm2 > 0
+                  ? population / areaKm2
+                  : null;
+
+            if (isMounted) {
+              setPopulationHoverInfo({
+                overlayId: overlayIdRaw,
+                population,
+                density: density && Number.isFinite(density) ? density : null,
+                areaKm2,
+                lngLat: [event.lngLat.lng, event.lngLat.lat],
+              });
+            }
+          };
+
+          map.on("mousemove", POPULATION_FILL_LAYER_ID, handlePopulationMove);
+          map.on("mouseleave", POPULATION_FILL_LAYER_ID, clearPopulationHover);
 
           if (isMounted) {
             const stats = populationData.features.reduce(
@@ -1762,7 +1940,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     map.setPaintProperty(
       POPULATION_FILL_LAYER_ID,
       "fill-opacity",
-      populationOverlayEnabled ? populationOverlayOpacity : 0
+      createPopulationOpacityExpression(
+        populationOverlayEnabled,
+        populationOverlayOpacity
+      )
     );
 
     if (map.getLayer(POPULATION_OUTLINE_LAYER_ID)) {
@@ -1771,6 +1952,25 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         "visibility",
         visibility
       );
+    }
+
+    if (map.getLayer(POPULATION_HOVER_LAYER_ID)) {
+      map.setLayoutProperty(POPULATION_HOVER_LAYER_ID, "visibility", visibility);
+      if (!populationOverlayEnabled) {
+        map.setFilter(
+          POPULATION_HOVER_LAYER_ID,
+          [
+            "==",
+            ["get", "__overlayId"],
+            -1,
+          ] as unknown as ExpressionSpecification
+        );
+      }
+    }
+
+    if (!populationOverlayEnabled) {
+      setPopulationHoverInfo(null);
+      map.getCanvas().style.cursor = "";
     }
   }, [populationOverlayEnabled, populationOverlayOpacity]);
 
@@ -2069,6 +2269,36 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     populationOverlayOpacityRef.current = populationOverlayOpacity;
   }, [populationOverlayOpacity]);
 
+  const formatPopulationHover = useCallback(
+    (value: PopulationHoverInfo | null) => {
+      if (!value) {
+        return null;
+      }
+
+      const formattedPopulation = value.population.toLocaleString();
+      const formattedArea = `${
+        value.areaKm2 < 0.1
+          ? value.areaKm2.toFixed(3)
+          : value.areaKm2.toFixed(2)
+      } km²`;
+      const formattedDensity = value.density
+        ? `${Math.round(value.density).toLocaleString()} people / km²`
+        : "Density unavailable";
+
+      return {
+        population: formattedPopulation,
+        area: formattedArea,
+        density: formattedDensity,
+      };
+    },
+    []
+  );
+
+  const populationHoverDisplay = useMemo(
+    () => formatPopulationHover(populationHoverInfo),
+    [formatPopulationHover, populationHoverInfo]
+  );
+
   return (
     <Box sx={{ position: "relative", width: "100%", height: "100%" }}>
       <Box
@@ -2183,7 +2413,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                         height: 12,
                         borderRadius: 999,
                         background:
-                          "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
+                          "linear-gradient(90deg, rgba(254, 252, 232, 1) 0%, rgba(253, 230, 138, 1) 22%, rgba(250, 204, 21, 1) 50%, rgba(249, 115, 22, 1) 78%, rgba(234, 88, 12, 1) 100%)",
                         border: "1px solid rgba(148, 163, 184, 0.4)",
                       }}
                     />
@@ -2205,6 +2435,44 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                         Higher
                       </Typography>
                     </Stack>
+                    {populationOverlayEnabled && populationHoverDisplay && (
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          mt: 1.5,
+                          px: 1.5,
+                          py: 1.25,
+                          borderRadius: 2,
+                          borderColor: "rgba(59, 130, 246, 0.35)",
+                          backgroundColor: "rgba(30, 64, 175, 0.15)",
+                          color: "rgba(226, 232, 240, 0.92)",
+                        }}
+                      >
+                        <Typography
+                          variant="overline"
+                          sx={{
+                            display: "block",
+                            letterSpacing: 0.6,
+                            color: "rgba(191, 219, 254, 0.85)",
+                          }}
+                        >
+                          Hovered cell
+                        </Typography>
+                        <Typography variant="body2">
+                          {populationHoverDisplay.population} people
+                        </Typography>
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            display: "block",
+                            mt: 0.5,
+                            color: "rgba(191, 219, 254, 0.75)",
+                          }}
+                        >
+                          {populationHoverDisplay.area} · {populationHoverDisplay.density}
+                        </Typography>
+                      </Paper>
+                    )}
                     <Typography
                       variant="caption"
                       sx={{
@@ -3046,7 +3314,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   height: 12,
                   borderRadius: 999,
                   background:
-                    "linear-gradient(90deg, rgba(254, 243, 199, 1) 0%, rgba(253, 230, 138, 1) 25%, rgba(251, 191, 36, 1) 50%, rgba(249, 115, 22, 1) 75%, rgba(194, 65, 12, 1) 100%)",
+                    "linear-gradient(90deg, rgba(254, 252, 232, 1) 0%, rgba(253, 230, 138, 1) 22%, rgba(250, 204, 21, 1) 50%, rgba(249, 115, 22, 1) 78%, rgba(234, 88, 12, 1) 100%)",
                   border: "1px solid rgba(148, 163, 184, 0.4)",
                 }}
               />
