@@ -18,7 +18,7 @@ import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
-import { area, booleanPointInPolygon, point } from "@turf/turf";
+import { area, booleanPointInPolygon, centroid, point } from "@turf/turf";
 import {
   Avatar,
   Box,
@@ -132,6 +132,10 @@ type PopulationFeatureProperties = {
   normalizedCellId?: string | number;
 };
 
+type PopulationPointFeatureProperties = PopulationFeatureProperties & {
+  normalizedCellId: string | number;
+};
+
 type StoreFocus = {
   department: string;
   coordinates: [number, number];
@@ -192,6 +196,10 @@ type StoreHoverDetails = {
     city: string;
   };
   population: number | null;
+  catchment: {
+    radiusKm: number;
+    population: number | null;
+  };
   competition: {
     total: number;
     categories: {
@@ -222,7 +230,12 @@ const POPULATION_SOURCE_ID = "population-density";
 const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
 const POPULATION_HOVER_LAYER_ID = "population-density-hover";
+const POPULATION_CLUSTER_SOURCE_ID = "population-density-centroids";
+const POPULATION_CLUSTER_LAYER_ID = "population-density-clusters";
+const POPULATION_CLUSTER_COUNT_LAYER_ID = "population-density-cluster-count";
+const POPULATION_CLUSTER_POINT_LAYER_ID = "population-density-unclustered";
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
+const POPULATION_POLYGON_MIN_ZOOM = 9;
 
 const WEB_MERCATOR_RADIUS = 6378137;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -409,6 +422,120 @@ const normalizePopulationCollection = (
     ...collection,
     features,
   };
+};
+
+type PopulationCentroidInfo = {
+  id: string | number;
+  population: number;
+  coordinates: [number, number];
+};
+
+const createPopulationPointCollection = (
+  collection: GeoJSON.FeatureCollection<
+    GeoJSON.Polygon | GeoJSON.MultiPolygon,
+    PopulationFeatureProperties
+  >
+) => {
+  const features: GeoJSON.Feature<
+    GeoJSON.Point,
+    PopulationPointFeatureProperties
+  >[] = [];
+  const centroidIndex: PopulationCentroidInfo[] = [];
+
+  collection.features.forEach((feature, index) => {
+    if (!feature.geometry) {
+      return;
+    }
+
+    const normalizedId =
+      feature.properties?.normalizedCellId ??
+      feature.id ??
+      feature.properties?.id ??
+      feature.properties?.quadkey ??
+      index;
+
+    const centroidFeature = centroid(
+      feature as GeoJSON.Feature<
+        GeoJSON.Polygon | GeoJSON.MultiPolygon,
+        PopulationFeatureProperties
+      >
+    );
+
+    if (
+      !centroidFeature.geometry ||
+      centroidFeature.geometry.type !== "Point" ||
+      !Array.isArray(centroidFeature.geometry.coordinates)
+    ) {
+      return;
+    }
+
+    const coordinates = centroidFeature.geometry
+      .coordinates as GeoJSON.Position;
+    const lon = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+      return;
+    }
+
+    const populationValue = Number(feature.properties?.population ?? 0);
+
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [lon, lat],
+      },
+      properties: {
+        ...(feature.properties ?? {}),
+        normalizedCellId: normalizedId,
+        population: Number.isFinite(populationValue) ? populationValue : 0,
+      },
+    });
+
+    centroidIndex.push({
+      id: normalizedId,
+      population: Number.isFinite(populationValue) ? populationValue : 0,
+      coordinates: [lon, lat],
+    });
+  });
+
+  return {
+    collection: {
+      type: "FeatureCollection",
+      features,
+    } as GeoJSON.FeatureCollection<
+      GeoJSON.Point,
+      PopulationPointFeatureProperties
+    >,
+    index: centroidIndex,
+  };
+};
+
+const EARTH_RADIUS_KM = 6371;
+
+const toRadians = (value: number) => (value * Math.PI) / 180;
+
+const haversineDistanceKm = (
+  a: [number, number],
+  b: [number, number]
+): number => {
+  const [lon1, lat1] = a;
+  const [lon2, lat2] = b;
+
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const lat1Rad = toRadians(lat1);
+  const lat2Rad = toRadians(lat2);
+
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+
+  const h =
+    sinLat * sinLat +
+    Math.cos(lat1Rad) * Math.cos(lat2Rad) * sinLon * sinLon;
+
+  return 2 * EARTH_RADIUS_KM * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
 };
 
 
@@ -689,8 +816,16 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       GeoJSON.Polygon | GeoJSON.MultiPolygon,
       PopulationFeatureProperties
     >
-    | null
+  | null
   >(null);
+  const populationCentroidIndexRef = useRef<PopulationCentroidInfo[]>([]);
+  const [populationDataVersion, setPopulationDataVersion] = useState(0);
+  const [storeCatchmentRadiusKm, setStoreCatchmentRadiusKm] = useState(5);
+  const storeCatchmentRadiusRef = useRef(storeCatchmentRadiusKm);
+  const [storeCatchmentStats, setStoreCatchmentStats] = useState<
+    Record<string, number>
+  >({});
+  const storeCatchmentStatsRef = useRef<Record<string, number>>({});
   const storeCompetitionLookup = useRef<
     Map<string, BusinessProperties[]>
   >(new Map());
@@ -1207,6 +1342,75 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   ]);
 
   useEffect(() => {
+    storeCatchmentRadiusRef.current = storeCatchmentRadiusKm;
+  }, [storeCatchmentRadiusKm]);
+
+  useEffect(() => {
+    const populationCells = populationCentroidIndexRef.current;
+    if (!populationCells.length || storesData.length === 0) {
+      setStoreCatchmentStats({});
+      storeCatchmentStatsRef.current = {};
+      return;
+    }
+
+    const radius = storeCatchmentRadiusKm;
+    const nextStats: Record<string, number> = {};
+
+    for (const store of storesData) {
+      if (store.Longitude == null || store.Latitude == null) {
+        continue;
+      }
+
+      const normalizedKey = normalizeName(store.Department_Name);
+      const storeCoords: [number, number] = [
+        Number(store.Longitude),
+        Number(store.Latitude),
+      ];
+
+      if (!Number.isFinite(storeCoords[0]) || !Number.isFinite(storeCoords[1])) {
+        continue;
+      }
+
+      let totalPopulation = 0;
+      for (const cell of populationCells) {
+        const distanceKm = haversineDistanceKm(storeCoords, cell.coordinates);
+        if (Number.isFinite(distanceKm) && distanceKm <= radius) {
+          totalPopulation += cell.population;
+        }
+      }
+
+      if (totalPopulation > 0) {
+        nextStats[normalizedKey] = totalPopulation;
+      }
+    }
+
+    setStoreCatchmentStats(nextStats);
+    storeCatchmentStatsRef.current = nextStats;
+  }, [storesData, storeCatchmentRadiusKm, populationDataVersion]);
+
+  useEffect(() => {
+    setStoreHoverDetails((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const normalizedKey = normalizeName(current.store.name);
+      const nextPopulation = storeCatchmentStats[normalizedKey];
+
+      return {
+        ...current,
+        catchment: {
+          radiusKm: storeCatchmentRadiusKm,
+          population:
+            nextPopulation != null && Number.isFinite(nextPopulation)
+              ? nextPopulation
+              : null,
+        },
+      };
+    });
+  }, [storeCatchmentRadiusKm, storeCatchmentStats]);
+
+  useEffect(() => {
     if (stores === undefined) {
       return;
     }
@@ -1383,17 +1587,174 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           );
 
           populationFeatureCollectionRef.current = populationData;
+          const { collection: populationPointCollection, index: centroidIndex } =
+            createPopulationPointCollection(populationData);
+          populationCentroidIndexRef.current = centroidIndex;
+          setPopulationDataVersion((value) => value + 1);
 
           map.addSource(POPULATION_SOURCE_ID, {
             type: "geojson",
             data: populationData,
           });
 
+          map.addSource(
+            POPULATION_CLUSTER_SOURCE_ID,
+            {
+              type: "geojson",
+              data: populationPointCollection,
+              cluster: true,
+              clusterMaxZoom: POPULATION_POLYGON_MIN_ZOOM,
+              clusterRadius: 60,
+              clusterProperties: {
+                population: [
+                  "+",
+                  ["coalesce", ["get", "population"], 0],
+                ],
+              },
+            } as maplibregl.GeoJSONSourceRaw
+          );
+
+          map.addLayer(
+            {
+              id: POPULATION_CLUSTER_LAYER_ID,
+              type: "circle",
+              source: POPULATION_CLUSTER_SOURCE_ID,
+              filter: ["has", "point_count"],
+              maxzoom: POPULATION_POLYGON_MIN_ZOOM,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+              },
+              paint: {
+                "circle-color": [
+                  "interpolate",
+                  ["linear"],
+                  ["coalesce", ["get", "population"], 0],
+                  0,
+                  "rgba(148, 163, 184, 0.15)",
+                  1000,
+                  "#bfdbfe",
+                  4000,
+                  "#60a5fa",
+                  12000,
+                  "#2563eb",
+                  25000,
+                  "#1d4ed8",
+                ] as unknown as ExpressionSpecification,
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["coalesce", ["get", "population"], 0],
+                  0,
+                  12,
+                  4000,
+                  20,
+                  12000,
+                  28,
+                  25000,
+                  36,
+                ],
+                "circle-opacity": 0.78,
+                "circle-stroke-color": "rgba(30, 41, 59, 0.55)",
+                "circle-stroke-width": 1.5,
+              },
+            },
+            "city-boundaries"
+          );
+
+          map.addLayer(
+            {
+              id: POPULATION_CLUSTER_COUNT_LAYER_ID,
+              type: "symbol",
+              source: POPULATION_CLUSTER_SOURCE_ID,
+              filter: ["has", "point_count"],
+              maxzoom: POPULATION_POLYGON_MIN_ZOOM,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+                "text-field": [
+                  "concat",
+                  [
+                    "to-string",
+                    ["round", ["coalesce", ["get", "population"], 0]],
+                  ],
+                  " ppl",
+                ],
+                "text-font": [
+                  "Open Sans Bold",
+                  "Arial Unicode MS Bold",
+                ],
+                "text-size": 11,
+                "text-letter-spacing": 0.05,
+              },
+              paint: {
+                "text-color": "#0f172a",
+                "text-halo-color": "rgba(248, 250, 252, 0.9)",
+                "text-halo-width": 1.4,
+              },
+            },
+            "city-boundaries"
+          );
+
+          map.addLayer(
+            {
+              id: POPULATION_CLUSTER_POINT_LAYER_ID,
+              type: "circle",
+              source: POPULATION_CLUSTER_SOURCE_ID,
+              filter: ["!has", "point_count"],
+              maxzoom: POPULATION_POLYGON_MIN_ZOOM,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+              },
+              paint: {
+                "circle-color": [
+                  "interpolate",
+                  ["linear"],
+                  ["coalesce", ["get", "population"], 0],
+                  0,
+                  "rgba(15, 23, 42, 0)",
+                  200,
+                  "#fef3c7",
+                  600,
+                  "#fde68a",
+                  1200,
+                  "#fbbf24",
+                  2000,
+                  "#f97316",
+                  3500,
+                  "#c2410c",
+                ] as unknown as ExpressionSpecification,
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["coalesce", ["get", "population"], 0],
+                  0,
+                  4,
+                  600,
+                  6.5,
+                  1500,
+                  8,
+                  3000,
+                  10.5,
+                ],
+                "circle-opacity": 0.85,
+                "circle-stroke-color": "rgba(30, 41, 59, 0.5)",
+                "circle-stroke-width": 1,
+              },
+            },
+            POPULATION_CLUSTER_COUNT_LAYER_ID
+          );
+
           map.addLayer(
             {
               id: POPULATION_FILL_LAYER_ID,
               type: "fill",
               source: POPULATION_SOURCE_ID,
+              minzoom: POPULATION_POLYGON_MIN_ZOOM,
               layout: {
                 visibility: populationOverlayEnabledRef.current
                   ? "visible"
@@ -1434,6 +1795,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               id: POPULATION_HOVER_LAYER_ID,
               type: "fill",
               source: POPULATION_SOURCE_ID,
+              minzoom: POPULATION_POLYGON_MIN_ZOOM,
               layout: {
                 visibility: populationOverlayEnabledRef.current
                   ? "visible"
@@ -1461,6 +1823,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               id: POPULATION_OUTLINE_LAYER_ID,
               type: "line",
               source: POPULATION_SOURCE_ID,
+              minzoom: POPULATION_POLYGON_MIN_ZOOM,
               layout: {
                 visibility: populationOverlayEnabledRef.current
                   ? "visible"
@@ -1572,6 +1935,22 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             if (populationOverlayEnabledRef.current) {
               map.getCanvas().style.cursor = "crosshair";
             }
+          });
+          map.on("mouseenter", POPULATION_CLUSTER_LAYER_ID, () => {
+            if (populationOverlayEnabledRef.current) {
+              map.getCanvas().style.cursor = "crosshair";
+            }
+          });
+          map.on("mouseleave", POPULATION_CLUSTER_LAYER_ID, () => {
+            map.getCanvas().style.cursor = "";
+          });
+          map.on("mouseenter", POPULATION_CLUSTER_POINT_LAYER_ID, () => {
+            if (populationOverlayEnabledRef.current) {
+              map.getCanvas().style.cursor = "crosshair";
+            }
+          });
+          map.on("mouseleave", POPULATION_CLUSTER_POINT_LAYER_ID, () => {
+            map.getCanvas().style.cursor = "";
           });
 
           if (isMounted) {
@@ -1866,6 +2245,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             .slice(0, 8);
 
           const populationValue = getPopulationAtPoint(event);
+          const catchmentPopulation =
+            storeCatchmentStatsRef.current[normalizeName(props.department)] ??
+            null;
           const containerRect = map.getContainer().getBoundingClientRect();
           const tooltipWidth = 260;
           const tooltipHeight = categories.length > 0 ? 190 : 150;
@@ -1889,6 +2271,13 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               city: props.city,
             },
             population: populationValue,
+            catchment: {
+              radiusKm: storeCatchmentRadiusRef.current,
+              population:
+                catchmentPopulation != null && Number.isFinite(catchmentPopulation)
+                  ? catchmentPopulation
+                  : null,
+            },
             competition: {
               total: competitionEntries.length,
               categories,
@@ -2264,6 +2653,26 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       map.setLayoutProperty(POPULATION_HOVER_LAYER_ID, "visibility", visibility);
     }
 
+    if (map.getLayer(POPULATION_CLUSTER_LAYER_ID)) {
+      map.setLayoutProperty(POPULATION_CLUSTER_LAYER_ID, "visibility", visibility);
+    }
+
+    if (map.getLayer(POPULATION_CLUSTER_COUNT_LAYER_ID)) {
+      map.setLayoutProperty(
+        POPULATION_CLUSTER_COUNT_LAYER_ID,
+        "visibility",
+        visibility
+      );
+    }
+
+    if (map.getLayer(POPULATION_CLUSTER_POINT_LAYER_ID)) {
+      map.setLayoutProperty(
+        POPULATION_CLUSTER_POINT_LAYER_ID,
+        "visibility",
+        visibility
+      );
+    }
+
     if (!populationOverlayEnabled) {
       clearPopulationHover();
     }
@@ -2559,6 +2968,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     const numericValue = Array.isArray(value) ? value[0] : value;
     setPopulationOverlayOpacity(Math.max(0, Math.min(1, numericValue / 100)));
   };
+
+  const handleCatchmentRadiusChange = useCallback(
+    (_event: Event, value: number | number[]) => {
+      const numericValue = Array.isArray(value) ? value[0] : value;
+      const clamped = Math.max(1, Math.min(25, Math.round(numericValue)));
+      setStoreCatchmentRadiusKm(clamped);
+    },
+    []
+  );
 
   useEffect(() => {
     populationOverlayEnabledRef.current = populationOverlayEnabled;
@@ -3550,6 +3968,49 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     </Box>
                   )}
                 </Box>
+                <Box sx={{ px: 2, pt: 1.75, pb: 1.5 }}>
+                  <Typography
+                    variant="overline"
+                    sx={{
+                      letterSpacing: 0.7,
+                      color: "rgba(148, 163, 184, 0.75)",
+                    }}
+                  >
+                    Store catchment radius
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: "rgba(226, 232, 240, 0.78)",
+                      mt: 0.75,
+                    }}
+                  >
+                    {`People living within ${storeCatchmentRadiusKm} km of each store.`}
+                  </Typography>
+                  <Slider
+                    size="small"
+                    min={1}
+                    max={25}
+                    step={1}
+                    value={storeCatchmentRadiusKm}
+                    onChange={handleCatchmentRadiusChange}
+                    valueLabelDisplay="auto"
+                    valueLabelFormat={(value) => `${value} km`}
+                    sx={{
+                      mt: 2,
+                      color: "#60a5fa",
+                      "& .MuiSlider-thumb": {
+                        border: "2px solid rgba(255, 255, 255, 0.85)",
+                      },
+                    }}
+                  />
+                  <Typography
+                    variant="caption"
+                    sx={{ color: "rgba(148, 163, 184, 0.7)" }}
+                  >
+                    Uses Kontur population grid to estimate local demand.
+                  </Typography>
+                </Box>
                 <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
                 <Box sx={{ px: 2, py: 2, overflowY: "auto", maxHeight: 240 }}>
                   {displayedStores.length === 0 ? (
@@ -3560,51 +4021,71 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                       No Viva Fresh locations for this selection yet.
                     </Typography>
                   ) : (
-                    displayedStores.map((store) => (
-                      <Box
-                        key={store.Department_Code}
-                        sx={{
-                          py: 1.5,
-                          borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
-                          "&:last-of-type": { borderBottom: "none" },
-                        }}
-                      >
-                        <Stack
-                          direction="row"
-                          spacing={1}
-                          alignItems="center"
-                          justifyContent="space-between"
-                        >
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                            {store.Department_Name}
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={store.Format ?? "Unspecified"}
-                            color="warning"
-                            variant="outlined"
-                            sx={{ color: "rgba(250, 204, 21, 0.92)" }}
-                          />
-                        </Stack>
-                        <Typography
-                          variant="body2"
-                          sx={{ color: "rgba(226, 232, 240, 0.75)", mt: 0.5 }}
-                        >
-                          {store.Adresse ?? "Address coming soon"}
-                        </Typography>
-                        <Typography
-                          variant="caption"
+                    displayedStores.map((store) => {
+                      const normalizedKey = normalizeName(store.Department_Name);
+                      const catchmentValue = storeCatchmentStats[normalizedKey];
+
+                      return (
+                        <Box
+                          key={store.Department_Code}
                           sx={{
-                            color: "rgba(148, 163, 184, 0.75)",
-                            mt: 0.5,
-                            display: "block",
+                            py: 1.5,
+                            borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
+                            "&:last-of-type": { borderBottom: "none" },
                           }}
                         >
-                          {(store.SQM ?? 0).toLocaleString()} m² • {store.Area_Name}
-                          {store.Zone_Name ? ` • ${store.Zone_Name}` : ""}
-                        </Typography>
-                      </Box>
-                    ))
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            alignItems="center"
+                            justifyContent="space-between"
+                          >
+                            <Typography
+                              variant="subtitle2"
+                              sx={{ fontWeight: 600 }}
+                            >
+                              {store.Department_Name}
+                            </Typography>
+                            <Chip
+                              size="small"
+                              label={store.Format ?? "Unspecified"}
+                              color="warning"
+                              variant="outlined"
+                              sx={{ color: "rgba(250, 204, 21, 0.92)" }}
+                            />
+                          </Stack>
+                          <Typography
+                            variant="body2"
+                            sx={{ color: "rgba(226, 232, 240, 0.75)", mt: 0.5 }}
+                          >
+                            {store.Adresse ?? "Address coming soon"}
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: "rgba(148, 163, 184, 0.75)",
+                              mt: 0.5,
+                              display: "block",
+                            }}
+                          >
+                            {(store.SQM ?? 0).toLocaleString()} m² • {store.Area_Name}
+                            {store.Zone_Name ? ` • ${store.Zone_Name}` : ""}
+                          </Typography>
+                          {catchmentValue != null && Number.isFinite(catchmentValue) && (
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                color: "rgba(191, 219, 254, 0.85)",
+                                mt: 0.75,
+                                display: "block",
+                              }}
+                            >
+                              {`Catchment: ${Math.round(catchmentValue).toLocaleString()} people within ${storeCatchmentRadiusKm} km`}
+                            </Typography>
+                          )}
+                        </Box>
+                      );
+                    })
                   )}
                   {additionalStoreCount > 0 && (
                     <Typography
@@ -3807,6 +4288,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               Population: {" "}
               {storeHoverDetails.population != null
                 ? `${Math.round(storeHoverDetails.population).toLocaleString()} people`
+                : "Data unavailable"}
+            </Typography>
+            <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.9)" }}>
+              Catchment ({storeHoverDetails.catchment.radiusKm} km):{" "}
+              {storeHoverDetails.catchment.population != null
+                ? `${Math.round(
+                    storeHoverDetails.catchment.population
+                  ).toLocaleString()} people`
                 : "Data unavailable"}
             </Typography>
             <Typography
