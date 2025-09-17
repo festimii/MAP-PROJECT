@@ -2,7 +2,7 @@ import axios from "axios";
 
 // Base URL for backend API
 const API = axios.create({
-  baseURL: "http://192.168.100.63:4000/api", // change to http://192.168.100.63:4000 for LAN
+  baseURL: "http://localhost:4000/api", // change to http://192.168.100.63:4000 for LAN
   timeout: 5000,
 });
 

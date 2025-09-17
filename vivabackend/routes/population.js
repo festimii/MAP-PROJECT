@@ -1,12 +1,13 @@
-// routes/population.js
 import { Router } from "express";
 import axios from "axios";
 import path from "path";
 import { fileURLToPath } from "url";
 import { stat } from "fs/promises";
-import { GeoPackageAPI } from "@ngageoint/geopackage";
+import pkg from "@ngageoint/geopackage";
 import { parsePX } from "../utils/pxParser.js";
 import { getPool } from "../db.js";
+
+const { GeoPackageAPI } = pkg; // ✅ only use GeoPackageAPI
 
 const router = Router();
 

@@ -1,4 +1,5 @@
-const rawBaseUrl = (import.meta.env?.VITE_API_BASE_URL as string | undefined) ??
+const rawBaseUrl =
+  (import.meta.env?.VITE_API_BASE_URL as string | undefined) ??
   "http://localhost:4000/api";
 
 export const API_BASE_URL = rawBaseUrl.replace(/\/+$/, "");
