@@ -9,10 +9,11 @@ import filtersRoutes from "./routes/filters.js";
 import zonesRoutes from "./routes/zones.js";
 import osmRoutes from "./routes/osm.js";
 import combinedRoutes from "./routes/combined.js";
+import populationRoutes from "./routes/population.js";
 
 const app = express();
 const PORT = 4000;
-const host = "0.0.0.0";
+const host = "localhost";
 
 // Middlewares
 app.use(cors());
@@ -26,6 +27,7 @@ app.use("/api/areas/filters", filtersRoutes);
 app.use("/api/zones", zonesRoutes);
 app.use("/api/osm", osmRoutes);
 app.use("/api/combined", combinedRoutes);
+app.use("/api/population", populationRoutes);
 
 // Start server
 app.listen(PORT, host, () => {
