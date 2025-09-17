@@ -1,5 +1,5 @@
 import {
-  ChangeEvent,
+  type ChangeEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -166,8 +166,7 @@ const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
 const POPULATION_SOURCE_ID = "population-density";
 const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
-const POPULATION_DATA_URL =
-  "/data/kontur_population_XK_20231101_sample.geojson";
+const POPULATION_DATA_URL = "data/kontur_population.json";
 
 const createStoreBaseFilter = (): FilterSpecification =>
   ["!has", "point_count"] as unknown as FilterSpecification;
@@ -260,9 +259,7 @@ const getStoreSelectionFilterContext = (
   }
 };
 
-const toGeoJsonObject = (
-  value: unknown
-): GeoJSON.GeoJsonObject | null => {
+const toGeoJsonObject = (value: unknown): GeoJSON.GeoJsonObject | null => {
   if (!value) {
     return null;
   }
@@ -297,9 +294,8 @@ const collectSubZoneGeometries = (value: unknown): GeoJSON.Geometry[] => {
       >;
       return (
         featureCollection.features
-          ?.filter(
-            (feature): feature is GeoJSON.Feature<GeoJSON.Geometry> =>
-              Boolean(feature?.geometry)
+          ?.filter((feature): feature is GeoJSON.Feature<GeoJSON.Geometry> =>
+            Boolean(feature?.geometry)
           )
           .map((feature) => feature.geometry) ?? []
       );
@@ -431,12 +427,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     useState(false);
   const [populationOverlayLoading, setPopulationOverlayLoading] =
     useState(false);
-  const [populationOverlayError, setPopulationOverlayError] =
-    useState<string | null>(null);
+  const [populationOverlayError, setPopulationOverlayError] = useState<
+    string | null
+  >(null);
   const [populationOverlayAvailable, setPopulationOverlayAvailable] =
     useState(false);
-  const [populationOverlayOpacity, setPopulationOverlayOpacity] =
-    useState(0.6);
+  const [populationOverlayOpacity, setPopulationOverlayOpacity] = useState(0.6);
   const [populationOverlayStats, setPopulationOverlayStats] =
     useState<PopulationOverlayStats | null>(null);
   const populationOverlayEnabledRef = useRef(populationOverlayEnabled);
@@ -1913,11 +1909,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         ),
       ],
       operations: [
-        toMetric(
-          "Avg. basket",
-          `€${avgBasket.toFixed(1)}`,
-          "Tax inclusive"
-        ),
+        toMetric("Avg. basket", `€${avgBasket.toFixed(1)}`, "Tax inclusive"),
         toMetric(
           "Staffed hours",
           `${staffedHours}`,
@@ -2075,7 +2067,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                       }}
                     >
                       {populationOverlayStats
-                        ? `${populationOverlayStats.cellCount.toLocaleString()} grid cells · ${Math.round(populationOverlayStats.totalPopulation).toLocaleString()} people total`
+                        ? `${populationOverlayStats.cellCount.toLocaleString()} grid cells · ${Math.round(
+                            populationOverlayStats.totalPopulation
+                          ).toLocaleString()} people total`
                         : "Toggle to reveal Kontur population intensity."}
                     </Typography>
                     <Box
@@ -2127,7 +2121,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                       sx={{
                         mt: 0.5,
                         color: "#f97316",
-                        '& .MuiSlider-thumb': {
+                        "& .MuiSlider-thumb": {
                           boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.25)",
                         },
                       }}
@@ -2297,7 +2291,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                     spacing={2}
                     alignItems="stretch"
                   >
-                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
+                    <Stack
+                      direction="row"
+                      spacing={1.5}
+                      alignItems="center"
+                      sx={{ flex: 1 }}
+                    >
                       <Avatar
                         variant="rounded"
                         sx={{
@@ -2329,7 +2328,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                         />
                       </Box>
                     </Stack>
-                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
+                    <Stack
+                      direction="row"
+                      spacing={1.5}
+                      alignItems="center"
+                      sx={{ flex: 1 }}
+                    >
                       <Avatar
                         variant="rounded"
                         sx={{
@@ -2364,9 +2368,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                             fontWeight: 500,
                           }}
                         >
-                          {`${
-                            selectionKpis.summary.yoyTrend >= 0 ? "+" : ""
-                          }${selectionKpis.summary.yoyTrend}% YoY`}
+                          {`${selectionKpis.summary.yoyTrend >= 0 ? "+" : ""}${
+                            selectionKpis.summary.yoyTrend
+                          }% YoY`}
                         </Typography>
                       </Box>
                     </Stack>
@@ -2405,7 +2409,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                       color="secondary"
                       variant="outlined"
                       icon={<ShoppingBag fontSize="small" />}
-                      label={`Avg basket €${selectionKpis.avgBasket.toFixed(1)}`}
+                      label={`Avg basket €${selectionKpis.avgBasket.toFixed(
+                        1
+                      )}`}
                     />
                   </Stack>
                 </Box>
@@ -2514,7 +2520,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               {selectionKpis && (
                 <>
                   <Divider
-                    sx={{ mt: 2, mb: 1.5, borderColor: "rgba(148, 163, 184, 0.18)" }}
+                    sx={{
+                      mt: 2,
+                      mb: 1.5,
+                      borderColor: "rgba(148, 163, 184, 0.18)",
+                    }}
                   />
                   <Box>
                     <Typography
@@ -2552,7 +2562,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                           </Typography>
                           <Typography
                             variant="subtitle1"
-                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                            sx={{
+                              fontWeight: 600,
+                              color: "rgba(191, 219, 254, 0.95)",
+                            }}
                           >
                             {metric.value}
                           </Typography>
@@ -2602,7 +2615,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                           </Typography>
                           <Typography
                             variant="subtitle1"
-                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                            sx={{
+                              fontWeight: 600,
+                              color: "rgba(191, 219, 254, 0.95)",
+                            }}
                           >
                             {metric.value}
                           </Typography>
@@ -2652,7 +2668,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                           </Typography>
                           <Typography
                             variant="subtitle1"
-                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                            sx={{
+                              fontWeight: 600,
+                              color: "rgba(191, 219, 254, 0.95)",
+                            }}
                           >
                             {metric.value}
                           </Typography>
@@ -2702,7 +2721,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                           </Typography>
                           <Typography
                             variant="subtitle1"
-                            sx={{ fontWeight: 600, color: "rgba(191, 219, 254, 0.95)" }}
+                            sx={{
+                              fontWeight: 600,
+                              color: "rgba(191, 219, 254, 0.95)",
+                            }}
                           >
                             {metric.value}
                           </Typography>
