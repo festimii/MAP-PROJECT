@@ -7,13 +7,18 @@ import {
   useRef,
   useState,
 } from "react";
-import maplibregl, { Map as MapLibreMap } from "maplibre-gl";
+import maplibregl, {
+  Map as MapLibreMap,
+  type MapGeoJSONFeature,
+  type MapLayerMouseEvent,
+} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useNavigate } from "react-router-dom";
 import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
+import { area } from "@turf/turf";
 import {
   Avatar,
   Box,
@@ -103,6 +108,8 @@ type PopulationFeatureProperties = {
   id?: string | number;
   population?: number;
   population_density?: number;
+  quadkey?: string;
+  normalizedCellId?: string | number;
 };
 
 type StoreFocus = {
@@ -148,6 +155,12 @@ type PopulationOverlayStats = {
   maxPopulation: number;
 };
 
+type PopulationHoverInfo = {
+  population: number;
+  density: number | null;
+  areaKm2: number | null;
+};
+
 type MapViewProps = {
   selection: MapSelection | null;
   cities: City[];
@@ -167,6 +180,7 @@ const COMPETITION_LABEL_VISIBILITY_ZOOM = 13;
 const POPULATION_SOURCE_ID = "population-density";
 const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
+const POPULATION_HOVER_LAYER_ID = "population-density-hover";
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
 
 const WEB_MERCATOR_RADIUS = 6378137;
@@ -238,23 +252,41 @@ const normalizePopulationCollection = (
 ) => {
   let convertedAny = false;
 
-  const features = collection.features.map((feature) => {
+  const features = collection.features.map((feature, index) => {
     if (!feature.geometry) {
       return feature;
     }
+
+    const normalizedId =
+      feature.id ??
+      feature.properties?.id ??
+      feature.properties?.quadkey ??
+      index;
 
     const { geometry, converted } = convertPopulationGeometryToLonLat(
       feature.geometry
     );
 
     if (!converted) {
-      return feature;
+      return {
+        ...feature,
+        id: normalizedId,
+        properties: {
+          ...(feature.properties ?? {}),
+          normalizedCellId: normalizedId,
+        },
+      };
     }
 
     convertedAny = true;
     return {
       ...feature,
       geometry,
+      id: normalizedId,
+      properties: {
+        ...(feature.properties ?? {}),
+        normalizedCellId: normalizedId,
+      },
     };
   });
 
@@ -538,6 +570,37 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     useState<PopulationOverlayStats | null>(null);
   const populationOverlayEnabledRef = useRef(populationOverlayEnabled);
   const populationOverlayOpacityRef = useRef(populationOverlayOpacity);
+  const [populationHoverInfo, setPopulationHoverInfo] =
+    useState<PopulationHoverInfo | null>(null);
+  const populationHoverFeatureIdRef = useRef<string | number | null>(null);
+
+  const clearPopulationHover = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    if (!map.getSource(POPULATION_SOURCE_ID)) {
+      populationHoverFeatureIdRef.current = null;
+      setPopulationHoverInfo(null);
+      map.getCanvas().style.cursor = "";
+      return;
+    }
+
+    if (populationHoverFeatureIdRef.current != null) {
+      map.setFeatureState(
+        {
+          source: POPULATION_SOURCE_ID,
+          id: populationHoverFeatureIdRef.current,
+        },
+        { hover: false }
+      );
+      populationHoverFeatureIdRef.current = null;
+    }
+
+    setPopulationHoverInfo(null);
+    map.getCanvas().style.cursor = "";
+  }, []);
 
   const filterBusinessFeaturesBySelection = useCallback(
     (
@@ -1225,9 +1288,39 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   ? populationOverlayOpacityRef.current
                   : 0,
                 "fill-outline-color": "rgba(17, 24, 39, 0.2)",
+                "fill-opacity-transition": {
+                  duration: 200,
+                },
               },
             },
             "city-boundaries"
+          );
+
+          map.addLayer(
+            {
+              id: POPULATION_HOVER_LAYER_ID,
+              type: "fill",
+              source: POPULATION_SOURCE_ID,
+              layout: {
+                visibility: populationOverlayEnabledRef.current
+                  ? "visible"
+                  : "none",
+              },
+              paint: {
+                "fill-color": "#f97316",
+                "fill-opacity": [
+                  "case",
+                  ["boolean", ["feature-state", "hover"], false],
+                  0.35,
+                  0,
+                ],
+                "fill-outline-color": "rgba(249, 115, 22, 0.9)",
+                "fill-opacity-transition": {
+                  duration: 120,
+                },
+              },
+            },
+            POPULATION_OUTLINE_LAYER_ID
           );
 
           map.addLayer(
@@ -1247,6 +1340,106 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             },
             "city-boundaries"
           );
+
+          const handlePopulationMouseMove = (event: MapLayerMouseEvent) => {
+            if (!populationOverlayEnabledRef.current) {
+              clearPopulationHover();
+              return;
+            }
+
+            const hoveredFeatures = (event.features as MapGeoJSONFeature[]) ??
+              (map.queryRenderedFeatures(event.point, {
+                layers: [POPULATION_FILL_LAYER_ID],
+              }) as MapGeoJSONFeature[]);
+
+            const targetFeature = hoveredFeatures?.[0];
+
+            if (!targetFeature || targetFeature.id == null) {
+              clearPopulationHover();
+              return;
+            }
+
+            const featureId = targetFeature.id as string | number;
+
+            if (populationHoverFeatureIdRef.current !== featureId) {
+              if (populationHoverFeatureIdRef.current != null) {
+                map.setFeatureState(
+                  {
+                    source: POPULATION_SOURCE_ID,
+                    id: populationHoverFeatureIdRef.current,
+                  },
+                  { hover: false }
+                );
+              }
+
+              populationHoverFeatureIdRef.current = featureId;
+            }
+
+            map.setFeatureState(
+              {
+                source: POPULATION_SOURCE_ID,
+                id: featureId,
+              },
+              { hover: true }
+            );
+
+            const props = targetFeature.properties as
+              | PopulationFeatureProperties
+              | undefined;
+            const rawPopulation = Number(props?.population ?? 0);
+
+            let areaKm2: number | null = null;
+            if (
+              targetFeature.geometry.type === "Polygon" ||
+              targetFeature.geometry.type === "MultiPolygon"
+            ) {
+              const areaSqMeters = area({
+                type: "Feature",
+                geometry: targetFeature.geometry,
+                properties: {},
+              } as GeoJSON.Feature<
+                GeoJSON.Polygon | GeoJSON.MultiPolygon,
+                PopulationFeatureProperties
+              >);
+              areaKm2 = Number.isFinite(areaSqMeters)
+                ? areaSqMeters / 1_000_000
+                : null;
+            }
+
+            const densityFromProps =
+              props?.population_density != null
+                ? Number(props.population_density)
+                : null;
+
+            const derivedDensity =
+              densityFromProps != null && Number.isFinite(densityFromProps)
+                ? densityFromProps
+                : areaKm2 && areaKm2 > 0
+                ? rawPopulation / areaKm2
+                : null;
+
+            setPopulationHoverInfo({
+              population: rawPopulation,
+              density:
+                derivedDensity != null && Number.isFinite(derivedDensity)
+                  ? derivedDensity
+                  : null,
+              areaKm2,
+            });
+          };
+
+          const handlePopulationMouseLeave = () => {
+            map.getCanvas().style.cursor = "";
+            clearPopulationHover();
+          };
+
+          map.on("mousemove", POPULATION_FILL_LAYER_ID, handlePopulationMouseMove);
+          map.on("mouseleave", POPULATION_FILL_LAYER_ID, handlePopulationMouseLeave);
+          map.on("mouseenter", POPULATION_FILL_LAYER_ID, () => {
+            if (populationOverlayEnabledRef.current) {
+              map.getCanvas().style.cursor = "crosshair";
+            }
+          });
 
           if (isMounted) {
             const stats = populationData.features.reduce(
@@ -1276,6 +1469,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             );
             setPopulationOverlayAvailable(false);
             setPopulationOverlayStats(null);
+            clearPopulationHover();
           }
         } finally {
           if (isMounted) {
@@ -1731,6 +1925,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     applySelectionToMap,
     updateStoreFocus,
     refreshBusinessCategoryState,
+    clearPopulationHover,
   ]);
 
   useEffect(() => {
@@ -1772,7 +1967,19 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         visibility
       );
     }
-  }, [populationOverlayEnabled, populationOverlayOpacity]);
+
+    if (map.getLayer(POPULATION_HOVER_LAYER_ID)) {
+      map.setLayoutProperty(POPULATION_HOVER_LAYER_ID, "visibility", visibility);
+    }
+
+    if (!populationOverlayEnabled) {
+      clearPopulationHover();
+    }
+  }, [
+    populationOverlayEnabled,
+    populationOverlayOpacity,
+    clearPopulationHover,
+  ]);
 
   const selectionCompetition = useMemo(() => {
     if (!selection) {
@@ -2205,6 +2412,82 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                         Higher
                       </Typography>
                     </Stack>
+                    <Box
+                      sx={{
+                        mt: 1.5,
+                        px: 1.25,
+                        py: 1,
+                        borderRadius: 2,
+                        backgroundColor: "rgba(15, 23, 42, 0.55)",
+                        border: "1px solid rgba(148, 163, 184, 0.35)",
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          display: "block",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.6,
+                          color: "rgba(148, 163, 184, 0.75)",
+                          mb: 0.75,
+                        }}
+                      >
+                        Hover insight
+                      </Typography>
+                      {populationOverlayEnabled && populationHoverInfo ? (
+                        <Stack spacing={0.75}>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 600,
+                              color: "rgba(226, 232, 240, 0.95)",
+                            }}
+                          >
+                            ~
+                            {Math.round(
+                              populationHoverInfo.population
+                            ).toLocaleString()} people
+                          </Typography>
+                          <Stack direction="row" spacing={1.5}>
+                            <Typography
+                              variant="caption"
+                              sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                            >
+                              Density:
+                              <Box component="span" sx={{ ml: 0.5 }}>
+                                {populationHoverInfo.density
+                                  ? `${Math.round(
+                                      populationHoverInfo.density
+                                    ).toLocaleString()} people/km²`
+                                  : "—"}
+                              </Box>
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              sx={{ color: "rgba(148, 163, 184, 0.75)" }}
+                            >
+                              Area:
+                              <Box component="span" sx={{ ml: 0.5 }}>
+                                {populationHoverInfo.areaKm2
+                                  ? `${populationHoverInfo.areaKm2.toFixed(
+                                      populationHoverInfo.areaKm2 >= 10 ? 1 : 2
+                                    )} km²`
+                                  : "—"}
+                              </Box>
+                            </Typography>
+                          </Stack>
+                        </Stack>
+                      ) : (
+                        <Typography
+                          variant="caption"
+                          sx={{ color: "rgba(148, 163, 184, 0.7)" }}
+                        >
+                          {populationOverlayEnabled
+                            ? "Hover over the map to estimate people covered by each grid cell."
+                            : "Enable the overlay to explore people per grid cell."}
+                        </Typography>
+                      )}
+                    </Box>
                     <Typography
                       variant="caption"
                       sx={{
