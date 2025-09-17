@@ -18,15 +18,7 @@ import type {
   ExpressionSpecification,
   FilterSpecification,
 } from "@maplibre/maplibre-gl-style-spec";
-import {
-  area,
-  booleanIntersects,
-  booleanPointInPolygon,
-  centerOfMass,
-  circle,
-  intersect,
-  point,
-} from "@turf/turf";
+import { area, booleanPointInPolygon, point } from "@turf/turf";
 import {
   Avatar,
   Box,
@@ -95,7 +87,6 @@ type StoreWithBusinesses = StoreData & {
 
 type StoreFeatureProperties = {
   department: string;
-  departmentCode: string;
   city: string;
   cityNormalized: string;
   area: string;
@@ -139,7 +130,6 @@ type PopulationFeatureProperties = {
   population_density?: number;
   quadkey?: string;
   normalizedCellId?: string | number;
-  cellAreaSqm?: number;
 };
 
 type StoreFocus = {
@@ -200,11 +190,8 @@ type StoreHoverDetails = {
     name: string;
     sqm: number | null;
     city: string;
-    departmentCode: string;
-    coordinates: [number, number];
   };
-  catchmentPopulation: number | null;
-  catchmentRadiusKm: number;
+  population: number | null;
   competition: {
     total: number;
     categories: {
@@ -235,16 +222,7 @@ const POPULATION_SOURCE_ID = "population-density";
 const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
 const POPULATION_HOVER_LAYER_ID = "population-density-hover";
-const POPULATION_CLUSTER_SOURCE_ID = "population-density-clusters";
-const POPULATION_CLUSTER_LAYER_ID = "population-density-cluster-circles";
-const POPULATION_CLUSTER_COUNT_LAYER_ID = "population-density-cluster-count";
-const POPULATION_CLUSTER_SINGLE_LAYER_ID = "population-density-unclustered";
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
-const POPULATION_CLUSTER_MAX_ZOOM = 9;
-const POPULATION_POLYGON_MIN_ZOOM = 9;
-const STORE_CATCHMENT_SOURCE_ID = "store-catchment-radius";
-const STORE_CATCHMENT_FILL_LAYER_ID = "store-catchment-radius-fill";
-const STORE_CATCHMENT_OUTLINE_LAYER_ID = "store-catchment-radius-outline";
 
 const WEB_MERCATOR_RADIUS = 6378137;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -400,31 +378,14 @@ const normalizePopulationCollection = (
       feature.geometry
     );
 
-    const nextProperties: PopulationFeatureProperties = {
-      ...(feature.properties ?? {}),
-      normalizedCellId: normalizedId,
-    };
-
-    try {
-      const computedArea = area({
-        type: "Feature",
-        geometry,
-        properties: nextProperties,
-      });
-      if (Number.isFinite(computedArea) && computedArea > 0) {
-        nextProperties.cellAreaSqm = computedArea;
-      }
-    } catch (areaError) {
-      if (import.meta.env.DEV) {
-        console.warn("Failed to compute population cell area", areaError);
-      }
-    }
-
     if (!converted) {
       return {
         ...feature,
         id: normalizedId,
-        properties: nextProperties,
+        properties: {
+          ...(feature.properties ?? {}),
+          normalizedCellId: normalizedId,
+        },
       };
     }
 
@@ -433,7 +394,10 @@ const normalizePopulationCollection = (
       ...feature,
       geometry,
       id: normalizedId,
-      properties: nextProperties,
+      properties: {
+        ...(feature.properties ?? {}),
+        normalizedCellId: normalizedId,
+      },
     };
   });
 
@@ -443,62 +407,6 @@ const normalizePopulationCollection = (
 
   return {
     ...collection,
-    features,
-  };
-};
-
-const buildPopulationClusterCollection = (
-  collection: GeoJSON.FeatureCollection<
-    GeoJSON.Polygon | GeoJSON.MultiPolygon,
-    PopulationFeatureProperties
-  >
-): GeoJSON.FeatureCollection<GeoJSON.Point, PopulationFeatureProperties> => {
-  const features: GeoJSON.Feature<
-    GeoJSON.Point,
-    PopulationFeatureProperties
-  >[] = [];
-
-  for (const feature of collection.features) {
-    if (!feature.geometry) {
-      continue;
-    }
-
-    const populationValue = Number(feature.properties?.population ?? 0);
-    if (!Number.isFinite(populationValue) || populationValue <= 0) {
-      continue;
-    }
-
-    try {
-      const centroid = centerOfMass(
-        feature as GeoJSON.Feature<
-          GeoJSON.Polygon | GeoJSON.MultiPolygon,
-          PopulationFeatureProperties
-        >
-      );
-
-      if (centroid.geometry?.type !== "Point") {
-        continue;
-      }
-
-      features.push({
-        type: "Feature",
-        geometry: centroid.geometry,
-        properties: {
-          population: populationValue,
-          normalizedCellId:
-            feature.properties?.normalizedCellId ?? feature.id ?? undefined,
-          cellAreaSqm: feature.properties?.cellAreaSqm,
-        },
-      });
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn("Unable to derive centroid for population feature", error);
-      }
-    }
-  }
-
-  return {
-    type: "FeatureCollection",
     features,
   };
 };
@@ -718,7 +626,6 @@ const buildStoreFeatureCollection = (
       },
       properties: {
         department: store.Department_Name,
-        departmentCode: store.Department_Code,
         city: fallbackCity,
         cityNormalized: normalizeName(fallbackCity),
         area: areaName,
@@ -784,80 +691,12 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     >
     | null
   >(null);
-  const [catchmentRadiusKm, setCatchmentRadiusKm] = useState(10);
-  const catchmentRadiusRef = useRef(catchmentRadiusKm);
-  const storeCatchmentPopulationRef = useRef<Map<string, number>>(new Map());
   const storeCompetitionLookup = useRef<
     Map<string, BusinessProperties[]>
   >(new Map());
   const [storeHoverDetails, setStoreHoverDetails] = useState<
     StoreHoverDetails | null
   >(null);
-
-  useEffect(() => {
-    catchmentRadiusRef.current = catchmentRadiusKm;
-  }, [catchmentRadiusKm]);
-
-  useEffect(() => {
-    storeCatchmentPopulationRef.current = storeCatchmentPopulation;
-  }, [storeCatchmentPopulation]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) {
-      return;
-    }
-
-    const source = map.getSource(
-      STORE_CATCHMENT_SOURCE_ID
-    ) as maplibregl.GeoJSONSource | null;
-
-    if (!source) {
-      return;
-    }
-
-    const updateVisibility = (visible: boolean) => {
-      const visibility = visible ? "visible" : "none";
-      if (map.getLayer(STORE_CATCHMENT_FILL_LAYER_ID)) {
-        map.setLayoutProperty(
-          STORE_CATCHMENT_FILL_LAYER_ID,
-          "visibility",
-          visibility
-        );
-      }
-      if (map.getLayer(STORE_CATCHMENT_OUTLINE_LAYER_ID)) {
-        map.setLayoutProperty(
-          STORE_CATCHMENT_OUTLINE_LAYER_ID,
-          "visibility",
-          visibility
-        );
-      }
-    };
-
-    if (!storeHoverDetails) {
-      source.setData({ type: "FeatureCollection", features: [] });
-      updateVisibility(false);
-      return;
-    }
-
-    try {
-      const catchmentGeometry = circle(
-        storeHoverDetails.store.coordinates,
-        catchmentRadiusKm,
-        { units: "kilometers", steps: 80 }
-      );
-
-      source.setData({
-        type: "FeatureCollection",
-        features: [catchmentGeometry],
-      });
-      updateVisibility(true);
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.warn("Failed to update store catchment geometry", error);
-      }
-    }
-  }, [storeHoverDetails, catchmentRadiusKm]);
   const [selectionPanelExpanded, setSelectionPanelExpanded] = useState(false);
   const [populationPanelExpanded, setPopulationPanelExpanded] = useState(false);
   const [legendExpanded, setLegendExpanded] = useState(false);
@@ -1324,137 +1163,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
   }, []);
 
-  const populationCollection = populationFeatureCollectionRef.current;
-
-  const storeCatchmentPopulation = useMemo(() => {
-    if (!populationCollection) {
-      return new Map<string, number>();
-    }
-
-    const validStores = storesData.filter(
-      (store) => store.Longitude != null && store.Latitude != null
-    );
-
-    if (validStores.length === 0) {
-      return new Map<string, number>();
-    }
-
-    const populationFeatures = populationCollection.features.filter(
-      (feature): feature is GeoJSON.Feature<
-        GeoJSON.Polygon | GeoJSON.MultiPolygon,
-        PopulationFeatureProperties
-      > => Boolean(feature.geometry)
-    );
-
-    if (populationFeatures.length === 0) {
-      return new Map<string, number>();
-    }
-
-    const result = new Map<string, number>();
-
-    for (const store of validStores) {
-      const radius = Math.max(0.25, catchmentRadiusKm);
-      const buffer = circle([store.Longitude!, store.Latitude!], radius, {
-        units: "kilometers",
-        steps: 80,
-      });
-
-      const bufferArea = area(buffer);
-      let totalPopulation = 0;
-
-      for (const populationFeature of populationFeatures) {
-        const populationValue = Number(
-          populationFeature.properties?.population ?? 0
-        );
-        if (!Number.isFinite(populationValue) || populationValue <= 0) {
-          continue;
-        }
-
-        const polygonArea = populationFeature.properties?.cellAreaSqm;
-        const normalizedPolygonArea =
-          polygonArea && polygonArea > 0
-            ? polygonArea
-            : area(populationFeature);
-
-        if (normalizedPolygonArea <= 0) {
-          continue;
-        }
-
-        if (!booleanIntersects(buffer, populationFeature)) {
-          continue;
-        }
-
-        let overlapFraction = 0;
-
-        try {
-          const overlap = intersect(buffer, populationFeature);
-          if (overlap) {
-            const overlapArea = area(overlap);
-            if (overlapArea > 0) {
-              overlapFraction = Math.min(
-                1,
-                overlapArea / normalizedPolygonArea
-              );
-            }
-          } else if (bufferArea > 0) {
-            overlapFraction = Math.min(1, bufferArea / normalizedPolygonArea);
-          }
-        } catch (error) {
-          if (import.meta.env.DEV) {
-            console.warn(
-              "Failed to intersect store catchment with population cell",
-              error
-            );
-          }
-        }
-
-        if (overlapFraction <= 0) {
-          continue;
-        }
-
-        totalPopulation += populationValue * overlapFraction;
-      }
-
-      result.set(store.Department_Code, totalPopulation);
-    }
-
-    return result;
-  }, [storesData, catchmentRadiusKm, populationCollection]);
-
-  const totalCatchmentPopulation = useMemo(() => {
-    let total = 0;
-    for (const value of storeCatchmentPopulation.values()) {
-      if (Number.isFinite(value)) {
-        total += value;
-      }
-    }
-    return total;
-  }, [storeCatchmentPopulation]);
-
-  useEffect(() => {
-    setStoreHoverDetails((current) => {
-      if (!current) {
-        return null;
-      }
-
-      const nextPopulation =
-        storeCatchmentPopulation.get(current.store.departmentCode) ?? null;
-
-      if (
-        nextPopulation === current.catchmentPopulation &&
-        current.catchmentRadiusKm === catchmentRadiusKm
-      ) {
-        return current;
-      }
-
-      return {
-        ...current,
-        catchmentPopulation: nextPopulation,
-        catchmentRadiusKm,
-      };
-    });
-  }, [storeCatchmentPopulation, catchmentRadiusKm]);
-
   useEffect(() => {
     selectedCategoryRef.current = selectedCategory;
   }, [selectedCategory]);
@@ -1681,185 +1389,11 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             data: populationData,
           });
 
-          map.addSource(POPULATION_CLUSTER_SOURCE_ID, {
-            type: "geojson",
-            data: buildPopulationClusterCollection(populationData),
-            cluster: true,
-            clusterRadius: 70,
-            clusterMaxZoom: POPULATION_CLUSTER_MAX_ZOOM,
-            clusterProperties: {
-              population: [
-                "+",
-                ["coalesce", ["get", "population"], 0],
-              ] as unknown as ExpressionSpecification,
-            },
-          });
-
-          map.addLayer({
-            id: POPULATION_CLUSTER_LAYER_ID,
-            type: "circle",
-            source: POPULATION_CLUSTER_SOURCE_ID,
-            filter: ["has", "point_count"],
-            maxzoom: POPULATION_CLUSTER_MAX_ZOOM,
-            layout: {
-              visibility: populationOverlayEnabledRef.current
-                ? "visible"
-                : "none",
-            },
-            paint: {
-              "circle-color": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                2000,
-                "rgba(251, 191, 36, 0.55)",
-                10000,
-                "rgba(249, 115, 22, 0.65)",
-                30000,
-                "rgba(234, 88, 12, 0.75)",
-                60000,
-                "rgba(194, 65, 12, 0.85)",
-              ] as unknown as ExpressionSpecification,
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                2000,
-                14,
-                10000,
-                20,
-                25000,
-                28,
-                60000,
-                38,
-              ] as unknown as ExpressionSpecification,
-              "circle-opacity": populationOverlayEnabledRef.current
-                ? Math.min(0.85, populationOverlayOpacityRef.current + 0.2)
-                : 0,
-              "circle-stroke-color": "rgba(248, 250, 252, 0.85)",
-              "circle-stroke-width": 1.5,
-            },
-          });
-
-          map.addLayer({
-            id: POPULATION_CLUSTER_COUNT_LAYER_ID,
-            type: "symbol",
-            source: POPULATION_CLUSTER_SOURCE_ID,
-            filter: ["has", "point_count"],
-            maxzoom: POPULATION_CLUSTER_MAX_ZOOM,
-            layout: {
-              "text-field": [
-                "case",
-                [">=", ["get", "population"], 1000000],
-                [
-                  "concat",
-                  [
-                    "to-string",
-                    [
-                      "/",
-                      [
-                        "round",
-                        [
-                          "*",
-                          [
-                            "/",
-                            ["coalesce", ["get", "population"], 0],
-                            1000000,
-                          ],
-                          10,
-                        ],
-                      ],
-                      10,
-                    ],
-                  ],
-                  "M",
-                ],
-                [">=", ["get", "population"], 1000],
-                [
-                  "concat",
-                  [
-                    "to-string",
-                    [
-                      "/",
-                      [
-                        "round",
-                        [
-                          "*",
-                          [
-                            "/",
-                            ["coalesce", ["get", "population"], 0],
-                            1000,
-                          ],
-                          10,
-                        ],
-                      ],
-                      10,
-                    ],
-                  ],
-                  "k",
-                ],
-                [
-                  "to-string",
-                  ["round", ["coalesce", ["get", "population"], 0]],
-                ],
-              ] as unknown as ExpressionSpecification,
-              "text-size": 12,
-              "text-font": [
-                "Open Sans Semibold",
-                "Arial Unicode MS Bold",
-              ],
-              "text-offset": [0, 0.1],
-              visibility: populationOverlayEnabledRef.current
-                ? "visible"
-                : "none",
-            },
-            paint: {
-              "text-color": "rgba(15, 23, 42, 0.92)",
-              "text-halo-color": "rgba(248, 250, 252, 0.92)",
-              "text-halo-width": 1.2,
-            },
-          });
-
-          map.addLayer({
-            id: POPULATION_CLUSTER_SINGLE_LAYER_ID,
-            type: "circle",
-            source: POPULATION_CLUSTER_SOURCE_ID,
-            filter: ["!has", "point_count"],
-            maxzoom: POPULATION_CLUSTER_MAX_ZOOM,
-            layout: {
-              visibility: populationOverlayEnabledRef.current
-                ? "visible"
-                : "none",
-            },
-            paint: {
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                500,
-                4,
-                2000,
-                6.5,
-                8000,
-                9,
-                16000,
-                12,
-              ] as unknown as ExpressionSpecification,
-              "circle-color": "rgba(248, 250, 252, 0.9)",
-              "circle-stroke-color": "rgba(234, 88, 12, 0.85)",
-              "circle-stroke-width": 1.5,
-              "circle-opacity": populationOverlayEnabledRef.current
-                ? Math.min(0.75, populationOverlayOpacityRef.current + 0.15)
-                : 0,
-            },
-          });
-
           map.addLayer(
             {
               id: POPULATION_FILL_LAYER_ID,
               type: "fill",
               source: POPULATION_SOURCE_ID,
-              minzoom: POPULATION_POLYGON_MIN_ZOOM,
               layout: {
                 visibility: populationOverlayEnabledRef.current
                   ? "visible"
@@ -1900,7 +1434,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               id: POPULATION_HOVER_LAYER_ID,
               type: "fill",
               source: POPULATION_SOURCE_ID,
-              minzoom: POPULATION_POLYGON_MIN_ZOOM,
               layout: {
                 visibility: populationOverlayEnabledRef.current
                   ? "visible"
@@ -1928,7 +1461,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               id: POPULATION_OUTLINE_LAYER_ID,
               type: "line",
               source: POPULATION_SOURCE_ID,
-              minzoom: POPULATION_POLYGON_MIN_ZOOM,
               layout: {
                 visibility: populationOverlayEnabledRef.current
                   ? "visible"
@@ -2138,42 +1670,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           data: buildSubzoneFeatureCollection(storesForSource),
         });
 
-        map.addSource(STORE_CATCHMENT_SOURCE_ID, {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: [],
-          },
-        });
-
-        map.addLayer({
-          id: STORE_CATCHMENT_FILL_LAYER_ID,
-          type: "fill",
-          source: STORE_CATCHMENT_SOURCE_ID,
-          layout: {
-            visibility: "none",
-          },
-          paint: {
-            "fill-color": "rgba(239, 68, 68, 0.12)",
-            "fill-outline-color": "rgba(239, 68, 68, 0.12)",
-          },
-        });
-
-        map.addLayer({
-          id: STORE_CATCHMENT_OUTLINE_LAYER_ID,
-          type: "line",
-          source: STORE_CATCHMENT_SOURCE_ID,
-          layout: {
-            visibility: "none",
-          },
-          paint: {
-            "line-color": "rgba(239, 68, 68, 0.65)",
-            "line-width": 2,
-            "line-dasharray": [2, 1.5],
-            "line-blur": 0.5,
-          },
-        });
-
         map.addLayer({
           id: "subzone-highlight",
           type: "line",
@@ -2336,9 +1832,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             return;
           }
 
-          const feature = event.features[0];
-          const props = feature.properties as unknown as StoreFeatureProperties;
-          const featureGeometry = feature.geometry as GeoJSON.Point | undefined;
+          const props = event.features[0]
+            .properties as unknown as StoreFeatureProperties;
 
           const competitionEntries =
             storeCompetitionLookup.current.get(props.department) ?? [];
@@ -2370,15 +1865,10 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             .sort((a, b) => b.count - a.count)
             .slice(0, 8);
 
-          const catchmentPopulationValue =
-            storeCatchmentPopulationRef.current.get(
-              props.departmentCode ?? props.department
-            ) ?? null;
-          const populationValue =
-            catchmentPopulationValue ?? getPopulationAtPoint(event);
+          const populationValue = getPopulationAtPoint(event);
           const containerRect = map.getContainer().getBoundingClientRect();
           const tooltipWidth = 260;
-          const tooltipHeight = categories.length > 0 ? 210 : 170;
+          const tooltipHeight = categories.length > 0 ? 190 : 150;
           const baseLeft = event.point.x + 18;
           const baseTop = event.point.y + 18;
           const maxLeft = Math.max(8, containerRect.width - tooltipWidth);
@@ -2387,11 +1877,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           const rawSqm = props.sqm != null ? Number(props.sqm) : null;
           const normalizedSqm =
             rawSqm != null && Number.isFinite(rawSqm) ? rawSqm : null;
-
-          const storeCoordinates =
-            featureGeometry?.type === "Point"
-              ? (featureGeometry.coordinates as [number, number])
-              : ([event.lngLat.lng, event.lngLat.lat] as [number, number]);
 
           setStoreHoverDetails({
             position: {
@@ -2402,11 +1887,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               name: props.department,
               sqm: normalizedSqm,
               city: props.city,
-              departmentCode: props.departmentCode,
-              coordinates: storeCoordinates,
             },
-            catchmentPopulation: populationValue,
-            catchmentRadiusKm: catchmentRadiusRef.current,
+            population: populationValue,
             competition: {
               total: competitionEntries.length,
               categories,
@@ -2770,48 +2252,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
       populationOverlayEnabled ? populationOverlayOpacity : 0
     );
 
-    const clusterVisibility = populationOverlayEnabled ? "visible" : "none";
-    const clusterOpacity = populationOverlayEnabled
-      ? Math.min(0.85, populationOverlayOpacity + 0.2)
-      : 0;
-    const singleOpacity = populationOverlayEnabled
-      ? Math.min(0.75, populationOverlayOpacity + 0.15)
-      : 0;
-
-    if (map.getLayer(POPULATION_CLUSTER_LAYER_ID)) {
-      map.setLayoutProperty(
-        POPULATION_CLUSTER_LAYER_ID,
-        "visibility",
-        clusterVisibility
-      );
-      map.setPaintProperty(
-        POPULATION_CLUSTER_LAYER_ID,
-        "circle-opacity",
-        clusterOpacity
-      );
-    }
-
-    if (map.getLayer(POPULATION_CLUSTER_COUNT_LAYER_ID)) {
-      map.setLayoutProperty(
-        POPULATION_CLUSTER_COUNT_LAYER_ID,
-        "visibility",
-        clusterVisibility
-      );
-    }
-
-    if (map.getLayer(POPULATION_CLUSTER_SINGLE_LAYER_ID)) {
-      map.setLayoutProperty(
-        POPULATION_CLUSTER_SINGLE_LAYER_ID,
-        "visibility",
-        clusterVisibility
-      );
-      map.setPaintProperty(
-        POPULATION_CLUSTER_SINGLE_LAYER_ID,
-        "circle-opacity",
-        singleOpacity
-      );
-    }
-
     if (map.getLayer(POPULATION_OUTLINE_LAYER_ID)) {
       map.setLayoutProperty(
         POPULATION_OUTLINE_LAYER_ID,
@@ -3047,7 +2487,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         toMetric(
           "Household reach",
           `${householdReach}%`,
-          `Population within a ${catchmentRadiusKm.toLocaleString()} km radius`
+          "Population within a 10 km radius"
         ),
         toMetric(
           "New shopper gain",
@@ -3098,9 +2538,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
         ),
       ],
     };
-  }, [selectionSummary, catchmentRadiusKm]);
-
-  const populationDataLoaded = populationFeatureCollectionRef.current != null;
+  }, [selectionSummary]);
 
   const handleCategoryChange = (event: SelectChangeEvent<string>) => {
     categorySelectionWasUserDriven.current = true;
@@ -3120,14 +2558,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   ) => {
     const numericValue = Array.isArray(value) ? value[0] : value;
     setPopulationOverlayOpacity(Math.max(0, Math.min(1, numericValue / 100)));
-  };
-
-  const handleCatchmentRadiusChange = (
-    _event: Event,
-    value: number | number[]
-  ) => {
-    const numericValue = Array.isArray(value) ? value[0] : value;
-    setCatchmentRadiusKm(Math.max(1, Math.min(25, Math.round(numericValue))));
   };
 
   useEffect(() => {
@@ -3309,80 +2739,6 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                           Higher
                         </Typography>
                       </Stack>
-                      <Box
-                        sx={{
-                          mt: 1.75,
-                          p: 1.25,
-                          borderRadius: 2,
-                          backgroundColor: "rgba(30, 41, 59, 0.75)",
-                          border: "1px solid rgba(148, 163, 184, 0.25)",
-                        }}
-                      >
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color: "rgba(226, 232, 240, 0.9)",
-                            fontWeight: 600,
-                          }}
-                        >
-                          Store catchment radius
-                        </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            display: "block",
-                            mt: 0.5,
-                            color: "rgba(148, 163, 184, 0.75)",
-                          }}
-                        >
-                          Adjust the population reach distance around each Viva
-                          Fresh location.
-                        </Typography>
-                        <Slider
-                          size="small"
-                          min={1}
-                          max={25}
-                          step={1}
-                          value={catchmentRadiusKm}
-                          onChange={handleCatchmentRadiusChange}
-                          valueLabelDisplay="auto"
-                          sx={{ mt: 2, mx: 0.5 }}
-                          disabled={!populationDataLoaded}
-                        />
-                        <Stack
-                          direction="row"
-                          justifyContent="space-between"
-                          sx={{ mt: 0.75 }}
-                        >
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(226, 232, 240, 0.85)" }}
-                          >
-                            {catchmentRadiusKm.toLocaleString()} km radius
-                          </Typography>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: "rgba(148, 163, 184, 0.75)" }}
-                          >
-                            {populationDataLoaded && storesData.length > 0
-                              ? `~${Math.round(
-                                  totalCatchmentPopulation
-                                ).toLocaleString()} people reached`
-                              : "Catchment pending"}
-                          </Typography>
-                        </Stack>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            display: "block",
-                            mt: 0.75,
-                            color: "rgba(148, 163, 184, 0.7)",
-                          }}
-                        >
-                          Hover a store to see statements like “Store A reaches
-                          45k people.”
-                        </Typography>
-                      </Box>
                       <Box
                         sx={{
                           mt: 1.5,
@@ -4204,33 +3560,20 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                       No Viva Fresh locations for this selection yet.
                     </Typography>
                   ) : (
-                    displayedStores.map((store) => {
-                      const catchment = storeCatchmentPopulation.get(
-                        store.Department_Code
-                      );
-                      const catchmentText =
-                        catchment != null &&
-                        Number.isFinite(catchment) &&
-                        catchment > 0
-                          ? `Reaches ~${Math.round(
-                              catchment
-                            ).toLocaleString()} people within ${catchmentRadiusKm.toLocaleString()} km`
-                          : "Catchment reach pending";
-
-                      return (
-                        <Box
-                          key={store.Department_Code}
-                          sx={{
-                            py: 1.5,
-                            borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
-                            "&:last-of-type": { borderBottom: "none" },
-                          }}
-                        >
-                          <Stack
-                            direction="row"
-                            spacing={1}
-                            alignItems="center"
-                            justifyContent="space-between"
+                    displayedStores.map((store) => (
+                      <Box
+                        key={store.Department_Code}
+                        sx={{
+                          py: 1.5,
+                          borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
+                          "&:last-of-type": { borderBottom: "none" },
+                        }}
+                      >
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                          justifyContent="space-between"
                         >
                           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                             {store.Department_Name}
@@ -4260,19 +3603,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                           {(store.SQM ?? 0).toLocaleString()} m² • {store.Area_Name}
                           {store.Zone_Name ? ` • ${store.Zone_Name}` : ""}
                         </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            color: "rgba(226, 232, 240, 0.75)",
-                            mt: 0.5,
-                            display: "block",
-                          }}
-                        >
-                          {catchmentText}
-                        </Typography>
-                        </Box>
-                      );
-                    })
+                      </Box>
+                    ))
                   )}
                   {additionalStoreCount > 0 && (
                     <Typography
@@ -4472,11 +3804,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 : "Not specified"}
             </Typography>
             <Typography variant="body2" sx={{ color: "rgba(226, 232, 240, 0.9)" }}>
-              Catchment reach: {" "}
-              {storeHoverDetails.catchmentPopulation != null
-                ? `~${Math.round(
-                    storeHoverDetails.catchmentPopulation
-                  ).toLocaleString()} people within ${storeHoverDetails.catchmentRadiusKm.toLocaleString()} km`
+              Population: {" "}
+              {storeHoverDetails.population != null
+                ? `${Math.round(storeHoverDetails.population).toLocaleString()} people`
                 : "Data unavailable"}
             </Typography>
             <Typography
