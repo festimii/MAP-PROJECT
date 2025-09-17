@@ -65,12 +65,6 @@ const buildZoneGroups = (zones: RawZoneRecord[]): ZoneGroup[] => {
     const zoneCodeRaw = String(baseCode ?? `zone-${record.Zone_Name}`).trim();
     const zoneCode = zoneCodeRaw.length > 0 ? zoneCodeRaw : `zone-${record.Zone_Name}`;
     const zoneName = record.Zone_Name?.trim() || "Unassigned zone";
-    const departmentCodeRaw = record.Department_Code ?? record.Zone_Code;
-    const departmentCode = String(departmentCodeRaw ?? "").trim();
-    const departmentName =
-      record.Department_Name?.trim() ||
-      record.Zone_Name?.trim() ||
-      "Unassigned department";
 
     let group = groups.get(zoneCode);
     if (!group) {
@@ -88,8 +82,8 @@ const buildZoneGroups = (zones: RawZoneRecord[]): ZoneGroup[] => {
     }
 
     const department: Department = {
-      Department_Code: departmentCode.length > 0 ? departmentCode : zoneCode,
-      Department_Name: departmentName,
+      Department_Code: zoneCode,
+      Department_Name: zoneName,
       SQM: record.SQM,
       Longitude: record.Longitude,
       Latitude: record.Latitude,
@@ -124,7 +118,7 @@ const buildZoneByDepartmentIndex = (
 ): Map<string, RawZoneRecord> => {
   const index = new Map<string, RawZoneRecord>();
   for (const record of zones) {
-    const rawKey = record.Department_Code ?? record.Zone_Code ?? record.Zone_Name;
+    const rawKey = record.Zone_Code ?? record.Zone_Name;
     if (!rawKey) {
       continue;
     }
