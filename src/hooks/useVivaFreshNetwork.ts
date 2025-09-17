@@ -36,9 +36,13 @@ export const useVivaFreshNetwork = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const isMountedRef = useRef(true);
+  const isMountedRef = useRef(false);
 
   const loadData = useCallback(async () => {
+    if (!isMountedRef.current) {
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -81,6 +85,7 @@ export const useVivaFreshNetwork = () => {
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
     loadData();
 
     return () => {
