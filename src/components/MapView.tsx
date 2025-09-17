@@ -169,6 +169,105 @@ const POPULATION_FILL_LAYER_ID = "population-density-fill";
 const POPULATION_OUTLINE_LAYER_ID = "population-density-outline";
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
 
+const WEB_MERCATOR_RADIUS = 6378137;
+const RAD_TO_DEG = 180 / Math.PI;
+
+const isLikelyLonLatCoordinate = ([lng, lat]: [number, number]) =>
+  Math.abs(lng) <= 180 && Math.abs(lat) <= 90;
+
+const webMercatorToLonLat = (x: number, y: number): [number, number] => {
+  const lng = (x / WEB_MERCATOR_RADIUS) * RAD_TO_DEG;
+  const lat = Math.atan(Math.sinh(y / WEB_MERCATOR_RADIUS)) * RAD_TO_DEG;
+  return [lng, lat];
+};
+
+const convertPopulationGeometryToLonLat = (
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): {
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+  converted: boolean;
+} => {
+  const getSampleCoordinate = () => {
+    if (geometry.type === "Polygon") {
+      return geometry.coordinates[0]?.[0] as [number, number] | undefined;
+    }
+    return geometry.coordinates[0]?.[0]?.[0] as
+      | [number, number]
+      | undefined;
+  };
+
+  const sample = getSampleCoordinate();
+  if (!sample || isLikelyLonLatCoordinate(sample)) {
+    return { geometry, converted: false };
+  }
+
+  const convertRing = (ring: GeoJSON.Position[]) =>
+    ring.map((coord) => {
+      const [x, y] = coord as [number, number];
+      return webMercatorToLonLat(x, y);
+    });
+
+  if (geometry.type === "Polygon") {
+    return {
+      geometry: {
+        ...geometry,
+        coordinates: geometry.coordinates.map((ring) =>
+          convertRing(ring as GeoJSON.Position[])
+        ),
+      },
+      converted: true,
+    };
+  }
+
+  return {
+    geometry: {
+      ...geometry,
+      coordinates: geometry.coordinates.map((polygon) =>
+        polygon.map((ring) => convertRing(ring as GeoJSON.Position[]))
+      ),
+    },
+    converted: true,
+  };
+};
+
+const normalizePopulationCollection = (
+  collection: GeoJSON.FeatureCollection<
+    GeoJSON.Polygon | GeoJSON.MultiPolygon,
+    PopulationFeatureProperties
+  >
+) => {
+  let convertedAny = false;
+
+  const features = collection.features.map((feature) => {
+    if (!feature.geometry) {
+      return feature;
+    }
+
+    const { geometry, converted } = convertPopulationGeometryToLonLat(
+      feature.geometry
+    );
+
+    if (!converted) {
+      return feature;
+    }
+
+    convertedAny = true;
+    return {
+      ...feature,
+      geometry,
+    };
+  });
+
+  if (!convertedAny) {
+    return collection;
+  }
+
+  return {
+    ...collection,
+    features,
+  };
+};
+
 
 const createStoreBaseFilter = (): FilterSpecification =>
   ["!has", "point_count"] as unknown as FilterSpecification;
@@ -1079,11 +1178,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             );
           }
 
-          const populationData =
+          const rawPopulationData =
             (await populationResponse.json()) as GeoJSON.FeatureCollection<
               GeoJSON.Polygon | GeoJSON.MultiPolygon,
               PopulationFeatureProperties
             >;
+
+          const populationData = normalizePopulationCollection(
+            rawPopulationData
+          );
 
           map.addSource(POPULATION_SOURCE_ID, {
             type: "geojson",
