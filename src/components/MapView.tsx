@@ -24,8 +24,10 @@ import {
   Box,
   Button,
   Chip,
+  Collapse,
   Divider,
   FormControl,
+  IconButton,
   InputLabel,
   LinearProgress,
   MenuItem,
@@ -40,6 +42,8 @@ import type { SelectChangeEvent } from "@mui/material/Select";
 import {
   AccessTime,
   Bolt,
+  ExpandLess,
+  ExpandMore,
   LocationCity,
   MapOutlined,
   ShoppingBag,
@@ -573,6 +577,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
   const [populationHoverInfo, setPopulationHoverInfo] =
     useState<PopulationHoverInfo | null>(null);
   const populationHoverFeatureIdRef = useRef<string | number | null>(null);
+  const [selectionWidgetMinimized, setSelectionWidgetMinimized] =
+    useState(true);
 
   const clearPopulationHover = useCallback(() => {
     const map = mapRef.current;
@@ -2627,230 +2633,271 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               overflow: "hidden",
             }}
           >
-            <Box sx={{ p: 2.5, pb: 2 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
-                <Typography
-                  variant="overline"
+            <Box sx={{ p: 2.5, pb: selectionWidgetMinimized ? 2.5 : 2 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                spacing={1.5}
+              >
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <LocationCity sx={{ fontSize: 20, color: "primary.light" }} />
+                  <Typography
+                    variant="overline"
+                    sx={{
+                      letterSpacing: 0.8,
+                      color: "rgba(148, 163, 184, 0.85)",
+                    }}
+                  >
+                    {selectionSummary.focusLabel}
+                  </Typography>
+                </Stack>
+                <IconButton
+                  size="small"
+                  aria-label={
+                    selectionWidgetMinimized
+                      ? "Expand selection insights"
+                      : "Collapse selection insights"
+                  }
+                  onClick={() =>
+                    setSelectionWidgetMinimized((prevState) => !prevState)
+                  }
                   sx={{
-                    letterSpacing: 0.8,
                     color: "rgba(148, 163, 184, 0.85)",
+                    backgroundColor: "rgba(15, 23, 42, 0.6)",
+                    border: "1px solid rgba(148, 163, 184, 0.35)",
+                    transition: "all 0.2s ease",
+                    "&:hover": {
+                      backgroundColor: "rgba(30, 41, 59, 0.9)",
+                    },
                   }}
                 >
-                  {selectionSummary.focusLabel}
-                </Typography>
+                  {selectionWidgetMinimized ? (
+                    <ExpandMore fontSize="small" />
+                  ) : (
+                    <ExpandLess fontSize="small" />
+                  )}
+                </IconButton>
               </Stack>
-              <Typography variant="h6" sx={{ fontWeight: 600, mt: 0.5 }}>
+              <Typography
+                variant="h6"
+                sx={{ fontWeight: 600, mt: 0.75, lineHeight: 1.3 }}
+              >
                 {selectionSummary.label}
               </Typography>
-              {selectionSummary.mode === "city" && (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="info"
-                  startIcon={<TravelExplore fontSize="small" />}
-                  sx={{
-                    mt: 1.5,
-                    borderRadius: 9999,
-                    alignSelf: "flex-start",
-                  }}
-                  onClick={() =>
-                    navigate(
-                      `/report/${encodeURIComponent(selectionSummary.label)}`
-                    )
-                  }
-                >
-                  Open layered report
-                </Button>
-              )}
-              {selectionKpis && (
-                <Box
-                  sx={{
-                    mt: 2,
-                    p: 2,
-                    borderRadius: 2.5,
-                    backgroundImage:
-                      "linear-gradient(135deg, rgba(59,130,246,0.14), rgba(236,72,153,0.08))",
-                    border: "1px solid rgba(96, 165, 250, 0.35)",
-                  }}
-                >
-                  <Stack
-                    direction={{ xs: "column", sm: "row" }}
-                    spacing={2}
-                    alignItems="stretch"
-                  >
-                    <Stack
-                      direction="row"
-                      spacing={1.5}
-                      alignItems="center"
-                      sx={{ flex: 1 }}
+              <Collapse in={!selectionWidgetMinimized} timeout="auto" unmountOnExit>
+                <Box>
+                  {selectionSummary.mode === "city" && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="info"
+                      startIcon={<TravelExplore fontSize="small" />}
+                      sx={{
+                        mt: 1.5,
+                        borderRadius: 9999,
+                        alignSelf: "flex-start",
+                      }}
+                      onClick={() =>
+                        navigate(
+                          `/report/${encodeURIComponent(selectionSummary.label)}`
+                        )
+                      }
                     >
-                      <Avatar
-                        variant="rounded"
-                        sx={{
-                          bgcolor: "rgba(59, 130, 246, 0.22)",
-                          border: "1px solid rgba(96, 165, 250, 0.4)",
-                          color: "rgba(191, 219, 254, 0.95)",
-                        }}
+                      Open layered report
+                    </Button>
+                  )}
+
+                  {selectionKpis && (
+                    <Box
+                      sx={{
+                        mt: 2,
+                        p: 2,
+                        borderRadius: 2.5,
+                        backgroundImage:
+                          "linear-gradient(135deg, rgba(59,130,246,0.14), rgba(236,72,153,0.08))",
+                        border: "1px solid rgba(96, 165, 250, 0.35)",
+                      }}
+                    >
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={2}
+                        alignItems="stretch"
                       >
-                        <Bolt fontSize="small" />
-                      </Avatar>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            letterSpacing: 0.8,
-                            color: "rgba(191, 219, 254, 0.75)",
-                            textTransform: "uppercase",
-                          }}
+                        <Stack
+                          direction="row"
+                          spacing={1.5}
+                          alignItems="center"
+                          sx={{ flex: 1 }}
                         >
-                          Opportunity score
-                        </Typography>
-                        <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                          {selectionKpis.summary.opportunityScore}
-                        </Typography>
-                        <LinearProgress
-                          variant="determinate"
-                          value={selectionKpis.summary.opportunityScore}
-                          sx={{ mt: 1, height: 6, borderRadius: 999 }}
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              bgcolor: "rgba(59, 130, 246, 0.22)",
+                              border: "1px solid rgba(96, 165, 250, 0.4)",
+                              color: "rgba(191, 219, 254, 0.95)",
+                            }}
+                          >
+                            <Bolt fontSize="small" />
+                          </Avatar>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                letterSpacing: 0.8,
+                                color: "rgba(191, 219, 254, 0.75)",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Opportunity score
+                            </Typography>
+                            <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                              {selectionKpis.summary.opportunityScore}
+                            </Typography>
+                            <LinearProgress
+                              variant="determinate"
+                              value={selectionKpis.summary.opportunityScore}
+                              sx={{ mt: 1, height: 6, borderRadius: 999 }}
+                            />
+                          </Box>
+                        </Stack>
+                        <Stack
+                          direction="row"
+                          spacing={1.5}
+                          alignItems="center"
+                          sx={{ flex: 1 }}
+                        >
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              bgcolor: "rgba(16, 185, 129, 0.22)",
+                              border: "1px solid rgba(52, 211, 153, 0.4)",
+                              color: "rgba(167, 243, 208, 0.95)",
+                            }}
+                          >
+                            <TrendingUp fontSize="small" />
+                          </Avatar>
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                letterSpacing: 0.8,
+                                color: "rgba(167, 243, 208, 0.8)",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Momentum index
+                            </Typography>
+                            <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                              {selectionKpis.summary.momentumIndex}
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                color:
+                                  selectionKpis.summary.yoyTrend >= 0
+                                    ? "rgba(134, 239, 172, 0.95)"
+                                    : "rgba(248, 113, 113, 0.92)",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {`${selectionKpis.summary.yoyTrend >= 0 ? "+" : ""}${
+                                selectionKpis.summary.yoyTrend
+                              }% YoY`}
+                            </Typography>
+                          </Box>
+                        </Stack>
+                      </Stack>
+                      <Typography
+                        variant="body2"
+                        sx={{ mt: 2, color: "rgba(226, 232, 240, 0.85)" }}
+                      >
+                        {`Focus on ${selectionKpis.summary.primaryFocus} while building momentum in ${selectionKpis.summary.secondaryFocus}.`}
+                      </Typography>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        sx={{ mt: 1.5, flexWrap: "wrap" }}
+                      >
+                        <Chip
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                          label={selectionKpis.summary.primaryFocus}
                         />
-                      </Box>
-                    </Stack>
-                    <Stack
-                      direction="row"
-                      spacing={1.5}
-                      alignItems="center"
-                      sx={{ flex: 1 }}
-                    >
-                      <Avatar
-                        variant="rounded"
-                        sx={{
-                          bgcolor: "rgba(16, 185, 129, 0.22)",
-                          border: "1px solid rgba(52, 211, 153, 0.4)",
-                          color: "rgba(167, 243, 208, 0.95)",
-                        }}
-                      >
-                        <TrendingUp fontSize="small" />
-                      </Avatar>
-                      <Box>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            letterSpacing: 0.8,
-                            color: "rgba(167, 243, 208, 0.8)",
-                            textTransform: "uppercase",
-                          }}
-                        >
-                          Momentum index
-                        </Typography>
-                        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                          {selectionKpis.summary.momentumIndex}
-                        </Typography>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color:
-                              selectionKpis.summary.yoyTrend >= 0
-                                ? "rgba(134, 239, 172, 0.95)"
-                                : "rgba(248, 113, 113, 0.92)",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {`${selectionKpis.summary.yoyTrend >= 0 ? "+" : ""}${
-                            selectionKpis.summary.yoyTrend
-                          }% YoY`}
-                        </Typography>
-                      </Box>
-                    </Stack>
-                  </Stack>
-                  <Typography
-                    variant="body2"
-                    sx={{ mt: 2, color: "rgba(226, 232, 240, 0.85)" }}
-                  >
-                    {`Focus on ${selectionKpis.summary.primaryFocus} while building momentum in ${selectionKpis.summary.secondaryFocus}.`}
-                  </Typography>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={`Support: ${selectionKpis.summary.secondaryFocus}`}
+                          sx={{ borderColor: "rgba(96, 165, 250, 0.4)" }}
+                        />
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          icon={<AccessTime fontSize="small" />}
+                          label={`Dwell ${selectionKpis.dwellTime} min`}
+                        />
+                        <Chip
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                          icon={<ShoppingBag fontSize="small" />}
+                          label={`Avg basket €${selectionKpis.avgBasket.toFixed(1)}`}
+                        />
+                      </Stack>
+                    </Box>
+                  )}
+
                   <Stack
                     direction="row"
                     spacing={1}
                     sx={{ mt: 1.5, flexWrap: "wrap" }}
                   >
-                    <Chip
-                      size="small"
-                      color="primary"
-                      variant="outlined"
-                      label={selectionKpis.summary.primaryFocus}
-                    />
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      label={`Support: ${selectionKpis.summary.secondaryFocus}`}
-                      sx={{ borderColor: "rgba(96, 165, 250, 0.4)" }}
-                    />
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      icon={<AccessTime fontSize="small" />}
-                      label={`Dwell ${selectionKpis.dwellTime} min`}
-                    />
-                    <Chip
-                      size="small"
-                      color="secondary"
-                      variant="outlined"
-                      icon={<ShoppingBag fontSize="small" />}
-                      label={`Avg basket €${selectionKpis.avgBasket.toFixed(
-                        1
-                      )}`}
-                    />
+                    {selectionSummary.cities.map((city) => (
+                      <Chip
+                        key={city}
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        label={city}
+                      />
+                    ))}
                   </Stack>
-                </Box>
-              )}
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ mt: 1.5, flexWrap: "wrap" }}
-              >
-                {selectionSummary.cities.map((city) => (
-                  <Chip
-                    key={city}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                    label={city}
-                  />
-                ))}
-              </Stack>
-              {selectionSummary.mode === "zone" &&
-                selectionSummary.areas.length > 0 && (
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        letterSpacing: 0.7,
-                        color: "rgba(148, 163, 184, 0.75)",
-                      }}
-                    >
-                      Areas
-                    </Typography>
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      sx={{ flexWrap: "wrap", mt: 0.5 }}
-                    >
-                      {selectionSummary.areas.map((area) => (
-                        <Chip
-                          key={area}
-                          size="small"
-                          variant="outlined"
-                          label={area}
+
+                  {selectionSummary.mode === "zone" &&
+                    selectionSummary.areas.length > 0 && (
+                      <Box sx={{ mt: 1.5 }}>
+                        <Typography
+                          variant="overline"
                           sx={{
-                            borderColor: "rgba(148, 163, 184, 0.4)",
-                            color: "rgba(226, 232, 240, 0.9)",
+                            letterSpacing: 0.7,
+                            color: "rgba(148, 163, 184, 0.75)",
                           }}
-                        />
-                      ))}
-                    </Stack>
-                  </Box>
-                )}
+                        >
+                          Areas
+                        </Typography>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ flexWrap: "wrap", mt: 0.5 }}
+                        >
+                          {selectionSummary.areas.map((area) => (
+                            <Chip
+                              key={area}
+                              size="small"
+                              variant="outlined"
+                              label={area}
+                              sx={{
+                                borderColor: "rgba(148, 163, 184, 0.4)",
+                                color: "rgba(226, 232, 240, 0.9)",
+                              }}
+                            />
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
+                </Box>
+              </Collapse>
             </Box>
             <Divider sx={{ borderColor: "rgba(148, 163, 184, 0.2)" }} />
             <Box sx={{ p: 2, pt: 1.5 }}>
