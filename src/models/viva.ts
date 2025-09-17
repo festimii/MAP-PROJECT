@@ -22,6 +22,8 @@ export interface Department {
   Zone_Name?: string | null;
   Region_Code?: string | null;
   Region_Name?: string | null;
+  SubZone_Name?: string | null;
+  SubZone_GeoJSON?: GeoJSON.GeoJsonObject | null;
 }
 
 export interface RawAreaResponse {
@@ -44,6 +46,8 @@ export interface RawZoneRecord {
   Latitude: number | null;
   Adresse: string | null;
   Format: string | null;
+  SubZone_Name?: string | null;
+  SubZone_GeoJSON?: GeoJSON.GeoJsonObject | null;
 }
 
 export interface SidebarCityItem {

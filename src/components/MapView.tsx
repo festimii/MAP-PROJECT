@@ -68,6 +68,8 @@ type ZoneApiStore = {
   Latitude: number | null;
   Adresse: string | null;
   Format: string | null;
+  SubZone_Name: string | null;
+  SubZone_GeoJSON: GeoJSON.GeoJsonObject | null;
 };
 
 type BusinessProperties = {
@@ -84,6 +86,14 @@ type BusinessProperties = {
 type StoreFocus = {
   department: string;
   coordinates: [number, number];
+};
+
+type SubZoneFeatureProperties = {
+  department: string;
+  departmentCode: string;
+  departmentNormalized: string;
+  zone: string;
+  zoneNormalized: string;
 };
 
 const normalizeName = (value: string) => value.toLowerCase().trim();
@@ -194,6 +204,98 @@ const getStoreSelectionFilterContext = (
         cityNames: [],
       };
   }
+};
+
+const toGeoJsonObject = (
+  value: unknown
+): GeoJSON.GeoJsonObject | null => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as GeoJSON.GeoJsonObject;
+    } catch (err) {
+      console.warn("Failed to parse subzone GeoJSON", err);
+      return null;
+    }
+  }
+
+  if (typeof value === "object") {
+    return value as GeoJSON.GeoJsonObject;
+  }
+
+  return null;
+};
+
+const collectSubZoneGeometries = (value: unknown): GeoJSON.Geometry[] => {
+  const geoJson = toGeoJsonObject(value);
+  if (!geoJson) {
+    return [];
+  }
+
+  switch (geoJson.type) {
+    case "FeatureCollection":
+      return (
+        geoJson.features
+          ?.filter(
+            (feature): feature is GeoJSON.Feature<GeoJSON.Geometry> =>
+              Boolean(feature?.geometry)
+          )
+          .map((feature) => feature.geometry) ?? []
+      );
+    case "Feature":
+      return geoJson.geometry ? [geoJson.geometry] : [];
+    case "GeometryCollection":
+      return (
+        geoJson.geometries?.filter(
+          (geometry): geometry is GeoJSON.Geometry => Boolean(geometry)
+        ) ?? []
+      );
+    default:
+      return [geoJson as GeoJSON.Geometry];
+  }
+};
+
+const buildSubzoneFeatureCollection = (
+  stores: StoreData[]
+): GeoJSON.FeatureCollection<GeoJSON.Geometry, SubZoneFeatureProperties> => {
+  const features: GeoJSON.Feature<
+    GeoJSON.Geometry,
+    SubZoneFeatureProperties
+  >[] = [];
+
+  for (const store of stores) {
+    const geometries = collectSubZoneGeometries(store.SubZone_GeoJSON);
+    if (!geometries.length) {
+      continue;
+    }
+
+    const zoneName =
+      store.Zone_Name ?? store.Department_Name ?? "Unassigned Zone";
+    const zoneNormalized = normalizeName(zoneName);
+    const departmentNormalized = normalizeName(store.Department_Name);
+
+    for (const geometry of geometries) {
+      features.push({
+        type: "Feature",
+        geometry,
+        properties: {
+          department: store.Department_Name,
+          departmentCode: store.Department_Code,
+          departmentNormalized,
+          zone: zoneName,
+          zoneNormalized,
+        },
+      });
+    }
+  }
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
 };
 
 const buildStoreFeatureCollection = (
@@ -499,6 +601,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     const showCompetitionLabels =
       zoomLevel >= COMPETITION_LABEL_VISIBILITY_ZOOM;
 
+    const subzoneLayerId = "subzone-highlight";
+    const hasSubzoneLayer = Boolean(map.getLayer(subzoneLayerId));
+    const targetSubzoneNormalized = storeFocus
+      ? normalizeName(storeFocus.department)
+      : selectionValue && selectionValue.mode === "zone"
+      ? normalizeName(selectionValue.zone)
+      : null;
+
     if (map.getLayer("store-points")) {
       map.setFilter("store-points", storeDisplayFilter);
       map.setPaintProperty(
@@ -514,6 +624,20 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
 
     map.setFilter("city-highlight", cityHighlightFilter);
+
+    if (hasSubzoneLayer) {
+      if (targetSubzoneNormalized) {
+        map.setFilter(subzoneLayerId, [
+          "==",
+          "zoneNormalized",
+          targetSubzoneNormalized,
+        ]);
+        map.setLayoutProperty(subzoneLayerId, "visibility", "visible");
+      } else {
+        map.setFilter(subzoneLayerId, ["==", "zoneNormalized", "__none__"]);
+        map.setLayoutProperty(subzoneLayerId, "visibility", "none");
+      }
+    }
 
     const boundaryOpacityExpression = [
       "interpolate",
@@ -727,11 +851,21 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     }
 
     const updateSource = () => {
-      const source = map.getSource("stores") as maplibregl.GeoJSONSource | null;
-      if (source) {
-        source.setData(buildStoreFeatureCollection(stores));
-        applySelectionToMap();
+      const storeSource = map.getSource(
+        "stores"
+      ) as maplibregl.GeoJSONSource | null;
+      if (storeSource) {
+        storeSource.setData(buildStoreFeatureCollection(stores));
       }
+
+      const subzoneSource = map.getSource(
+        "subzones"
+      ) as maplibregl.GeoJSONSource | null;
+      if (subzoneSource) {
+        subzoneSource.setData(buildSubzoneFeatureCollection(stores));
+      }
+
+      applySelectionToMap();
     };
 
     if (!map.isStyleLoaded()) {
@@ -889,6 +1023,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                   City_Name: item.City_Name ?? undefined,
                   Zone_Code: item.Zone_Code ?? undefined,
                   Zone_Name: item.Zone_Name ?? undefined,
+                  SubZone_Name: item.SubZone_Name ?? null,
+                  SubZone_GeoJSON: item.SubZone_GeoJSON ?? null,
                 };
 
                 collected.push(store);
@@ -910,6 +1046,30 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
           type: "geojson",
           data: buildStoreFeatureCollection(storesForSource),
           cluster: false,
+        });
+
+        map.addSource("subzones", {
+          type: "geojson",
+          data: buildSubzoneFeatureCollection(storesForSource),
+        });
+
+        map.addLayer({
+          id: "subzone-highlight",
+          type: "line",
+          source: "subzones",
+          layout: {
+            visibility: "none",
+            "line-cap": "round",
+            "line-join": "round",
+          },
+          paint: {
+            "line-color": "#f97316",
+            "line-width": 4,
+            "line-opacity": 0.85,
+            "line-dasharray": [2, 1.5],
+            "line-blur": 0.5,
+          },
+          filter: ["==", "zoneNormalized", "__none__"],
         });
 
         // Individual store points
@@ -1279,6 +1439,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     darkMode,
     updateBusinessSource,
     applySelectionToMap,
+    updateStoreFocus,
     refreshBusinessCategoryState,
   ]);
 
