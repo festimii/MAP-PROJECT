@@ -248,6 +248,80 @@ const POPULATION_CLUSTER_COUNT_LAYER_ID = "population-density-cluster-count";
 const POPULATION_CLUSTER_UNCLUSTERED_LAYER_ID =
   "population-density-single";
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
+const POPULATION_CLUSTER_HEX_ICON_BASE_SIZE = 128;
+
+const POPULATION_HEX_ICON_SPECS = [
+  {
+    id: "population-hex-very-low",
+    fill: "rgba(30, 41, 59, 0.55)",
+    stroke: "rgba(15, 23, 42, 0.45)",
+  },
+  {
+    id: "population-hex-low",
+    fill: "#fde68a",
+    stroke: "rgba(15, 23, 42, 0.45)",
+  },
+  {
+    id: "population-hex-medium",
+    fill: "#fbbf24",
+    stroke: "rgba(15, 23, 42, 0.45)",
+  },
+  {
+    id: "population-hex-high",
+    fill: "#f97316",
+    stroke: "rgba(15, 23, 42, 0.45)",
+  },
+  {
+    id: "population-hex-very-high",
+    fill: "#c2410c",
+    stroke: "rgba(15, 23, 42, 0.45)",
+  },
+] as const;
+
+const POPULATION_CLUSTER_ICON_IMAGE_EXPRESSION = [
+  "case",
+  [">=", ["coalesce", ["get", "population"], 0], 6000],
+  "population-hex-very-high",
+  [">=", ["coalesce", ["get", "population"], 0], 3500],
+  "population-hex-high",
+  [">=", ["coalesce", ["get", "population"], 0], 1500],
+  "population-hex-medium",
+  [">=", ["coalesce", ["get", "population"], 0], 500],
+  "population-hex-low",
+  "population-hex-very-low",
+] as unknown as ExpressionSpecification;
+
+const POPULATION_CLUSTER_ICON_SIZE_EXPRESSION = [
+  "interpolate",
+  ["linear"],
+  ["coalesce", ["get", "population"], 0],
+  0,
+  0.22,
+  1000,
+  0.32,
+  2500,
+  0.42,
+  5000,
+  0.5,
+  8000,
+  0.6,
+] as unknown as ExpressionSpecification;
+
+const POPULATION_SINGLE_ICON_SIZE_EXPRESSION = [
+  "interpolate",
+  ["linear"],
+  ["coalesce", ["get", "population"], 0],
+  0,
+  0.16,
+  400,
+  0.2,
+  1200,
+  0.24,
+  2200,
+  0.28,
+  4000,
+  0.34,
+] as unknown as ExpressionSpecification;
 const POPULATION_POLYGON_MIN_ZOOM = 10;
 const POPULATION_CLUSTER_MAX_ZOOM = POPULATION_POLYGON_MIN_ZOOM - 1;
 const CATCHMENT_BUFFER_STEPS = 64;
@@ -451,6 +525,69 @@ type PopulationCellEntry = {
   centroid: [number, number];
   bbox: [number, number, number, number];
   population: number;
+};
+
+const createHexagonCanvas = (
+  size: number,
+  fill: string,
+  stroke: string,
+  strokeWidth = 4
+) => {
+  const pixelRatio = window.devicePixelRatio || 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = size * pixelRatio;
+  canvas.height = size * pixelRatio;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Failed to acquire 2D context for hexagon icon");
+  }
+
+  context.scale(pixelRatio, pixelRatio);
+
+  const centerX = size / 2;
+  const centerY = size / 2;
+  const radius = size / 2 - strokeWidth;
+
+  context.beginPath();
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (Math.PI / 3) * i - Math.PI / 2;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+    if (i === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+  }
+  context.closePath();
+
+  context.fillStyle = fill;
+  context.fill();
+
+  if (strokeWidth > 0) {
+    context.lineWidth = strokeWidth;
+    context.strokeStyle = stroke;
+    context.stroke();
+  }
+
+  return { canvas, pixelRatio };
+};
+
+const registerPopulationHexIcons = (map: MapLibreMap) => {
+  for (const icon of POPULATION_HEX_ICON_SPECS) {
+    if (map.hasImage(icon.id)) {
+      continue;
+    }
+
+    const { canvas, pixelRatio } = createHexagonCanvas(
+      POPULATION_CLUSTER_HEX_ICON_BASE_SIZE,
+      icon.fill,
+      icon.stroke
+    );
+
+    map.addImage(icon.id, canvas, { pixelRatio });
+  }
 };
 
 const buildPopulationCellEntries = (
@@ -1510,6 +1647,8 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             rawPopulationData
           );
 
+          registerPopulationHexIcons(map);
+
           populationFeatureCollectionRef.current = populationData;
           const populationEntries = buildPopulationCellEntries(populationData);
           populationCellEntriesRef.current = populationEntries;
@@ -1534,25 +1673,9 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             },
           });
 
-          const clusterColorExpression = [
-            "interpolate",
-            ["linear"],
-            ["coalesce", ["get", "population"], 0],
-            0,
-            "rgba(30, 41, 59, 0.55)",
-            500,
-            "#fde68a",
-            1500,
-            "#fbbf24",
-            3500,
-            "#f97316",
-            6000,
-            "#c2410c",
-          ] as unknown as ExpressionSpecification;
-
           map.addLayer({
             id: POPULATION_CLUSTER_LAYER_ID,
-            type: "circle",
+            type: "symbol",
             source: POPULATION_CLUSTER_SOURCE_ID,
             filter: ["has", "point_count"],
             minzoom: 0,
@@ -1561,29 +1684,16 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               visibility: populationOverlayEnabledRef.current
                 ? "visible"
                 : "none",
+              "icon-image": POPULATION_CLUSTER_ICON_IMAGE_EXPRESSION,
+              "icon-size": POPULATION_CLUSTER_ICON_SIZE_EXPRESSION,
+              "icon-anchor": "center",
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
             },
             paint: {
-              "circle-color": clusterColorExpression,
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                0,
-                14,
-                1000,
-                20,
-                2500,
-                26,
-                5000,
-                32,
-                8000,
-                38,
-              ],
-              "circle-opacity": populationOverlayEnabledRef.current
+              "icon-opacity": populationOverlayEnabledRef.current
                 ? Math.min(0.9, populationOverlayOpacityRef.current + 0.2)
                 : 0,
-              "circle-stroke-color": "rgba(15, 23, 42, 0.45)",
-              "circle-stroke-width": 1.5,
             },
           });
 
@@ -1639,7 +1749,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
 
           map.addLayer({
             id: POPULATION_CLUSTER_UNCLUSTERED_LAYER_ID,
-            type: "circle",
+            type: "symbol",
             source: POPULATION_CLUSTER_SOURCE_ID,
             filter: ["!", ["has", "point_count"]],
             minzoom: 0,
@@ -1648,29 +1758,16 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               visibility: populationOverlayEnabledRef.current
                 ? "visible"
                 : "none",
+              "icon-image": POPULATION_CLUSTER_ICON_IMAGE_EXPRESSION,
+              "icon-size": POPULATION_SINGLE_ICON_SIZE_EXPRESSION,
+              "icon-anchor": "center",
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
             },
             paint: {
-              "circle-color": clusterColorExpression,
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                0,
-                6,
-                400,
-                7.5,
-                1200,
-                9,
-                2200,
-                11,
-                4000,
-                13,
-              ],
-              "circle-opacity": populationOverlayEnabledRef.current
+              "icon-opacity": populationOverlayEnabledRef.current
                 ? Math.min(0.85, populationOverlayOpacityRef.current + 0.15)
                 : 0,
-              "circle-stroke-color": "rgba(15, 23, 42, 0.4)",
-              "circle-stroke-width": 1,
             },
           });
 
@@ -2636,7 +2733,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     if (map.getLayer(POPULATION_CLUSTER_LAYER_ID)) {
       map.setPaintProperty(
         POPULATION_CLUSTER_LAYER_ID,
-        "circle-opacity",
+        "icon-opacity",
         clusterOpacity
       );
     }
@@ -2644,7 +2741,7 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
     if (map.getLayer(POPULATION_CLUSTER_UNCLUSTERED_LAYER_ID)) {
       map.setPaintProperty(
         POPULATION_CLUSTER_UNCLUSTERED_LAYER_ID,
-        "circle-opacity",
+        "icon-opacity",
         singleOpacity
       );
     }
