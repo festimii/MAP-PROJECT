@@ -247,6 +247,67 @@ const POPULATION_CLUSTER_LAYER_ID = "population-density-cluster";
 const POPULATION_CLUSTER_COUNT_LAYER_ID = "population-density-cluster-count";
 const POPULATION_CLUSTER_UNCLUSTERED_LAYER_ID =
   "population-density-single";
+const POPULATION_HEX_BASE_ICON_SIZE = 64;
+const POPULATION_HEX_ICON_CONFIGS = [
+  { id: "population-hex-intense", color: "#c2410c" },
+  { id: "population-hex-strong", color: "#f97316" },
+  { id: "population-hex-medium", color: "#fbbf24" },
+  { id: "population-hex-light", color: "#fde68a" },
+  { id: "population-hex-base", color: "rgba(30, 41, 59, 0.55)" },
+] as const;
+
+const ensurePopulationHexIcons = (map: MapLibreMap) => {
+  const devicePixelRatio = window.devicePixelRatio || 1;
+  const canvasSize = POPULATION_HEX_BASE_ICON_SIZE;
+  const strokeColor = "rgba(15, 23, 42, 0.45)";
+  const strokeWidth = 3;
+
+  for (const config of POPULATION_HEX_ICON_CONFIGS) {
+    if (map.hasImage(config.id)) {
+      continue;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasSize * devicePixelRatio;
+    canvas.height = canvasSize * devicePixelRatio;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      continue;
+    }
+
+    context.scale(devicePixelRatio, devicePixelRatio);
+    context.clearRect(0, 0, canvasSize, canvasSize);
+
+    const radius = canvasSize / 2 - strokeWidth;
+    const centerX = canvasSize / 2;
+    const centerY = canvasSize / 2;
+
+    context.beginPath();
+    for (let i = 0; i < 6; i += 1) {
+      const angle = (Math.PI / 3) * i - Math.PI / 2;
+      const x = centerX + radius * Math.cos(angle);
+      const y = centerY + radius * Math.sin(angle);
+      if (i === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    }
+    context.closePath();
+
+    context.fillStyle = config.color;
+    context.fill();
+
+    context.lineWidth = strokeWidth;
+    context.strokeStyle = strokeColor;
+    context.stroke();
+
+    map.addImage(config.id, canvas, {
+      pixelRatio: devicePixelRatio,
+    });
+  }
+};
 const POPULATION_DATA_URL = buildApiUrl("/population/grid");
 const POPULATION_POLYGON_MIN_ZOOM = 10;
 const POPULATION_CLUSTER_MAX_ZOOM = POPULATION_POLYGON_MIN_ZOOM - 1;
@@ -1534,25 +1595,40 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
             },
           });
 
-          const clusterColorExpression = [
+          ensurePopulationHexIcons(map);
+
+          const clusterIconImageExpression = [
+            "case",
+            [">=", ["coalesce", ["get", "population"], 0], 6000],
+            "population-hex-intense",
+            [">=", ["coalesce", ["get", "population"], 0], 3500],
+            "population-hex-strong",
+            [">=", ["coalesce", ["get", "population"], 0], 1500],
+            "population-hex-medium",
+            [">=", ["coalesce", ["get", "population"], 0], 500],
+            "population-hex-light",
+            "population-hex-base",
+          ] as unknown as ExpressionSpecification;
+
+          const clusterIconSizeExpression = [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "population"], 0],
             0,
-            "rgba(30, 41, 59, 0.55)",
-            500,
-            "#fde68a",
-            1500,
-            "#fbbf24",
-            3500,
-            "#f97316",
-            6000,
-            "#c2410c",
+            28 / POPULATION_HEX_BASE_ICON_SIZE,
+            1000,
+            40 / POPULATION_HEX_BASE_ICON_SIZE,
+            2500,
+            52 / POPULATION_HEX_BASE_ICON_SIZE,
+            5000,
+            64 / POPULATION_HEX_BASE_ICON_SIZE,
+            8000,
+            76 / POPULATION_HEX_BASE_ICON_SIZE,
           ] as unknown as ExpressionSpecification;
 
           map.addLayer({
             id: POPULATION_CLUSTER_LAYER_ID,
-            type: "circle",
+            type: "symbol",
             source: POPULATION_CLUSTER_SOURCE_ID,
             filter: ["has", "point_count"],
             minzoom: 0,
@@ -1561,29 +1637,15 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               visibility: populationOverlayEnabledRef.current
                 ? "visible"
                 : "none",
+              "icon-image": clusterIconImageExpression,
+              "icon-size": clusterIconSizeExpression,
+              "icon-anchor": "center",
+              "icon-allow-overlap": false,
             },
             paint: {
-              "circle-color": clusterColorExpression,
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                0,
-                14,
-                1000,
-                20,
-                2500,
-                26,
-                5000,
-                32,
-                8000,
-                38,
-              ],
-              "circle-opacity": populationOverlayEnabledRef.current
+              "icon-opacity": populationOverlayEnabledRef.current
                 ? Math.min(0.9, populationOverlayOpacityRef.current + 0.2)
                 : 0,
-              "circle-stroke-color": "rgba(15, 23, 42, 0.45)",
-              "circle-stroke-width": 1.5,
             },
           });
 
@@ -1633,13 +1695,28 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
                 "text-halo-color": "#f8fafc",
                 "text-halo-width": 1.4,
               },
-            },
-            POPULATION_CLUSTER_LAYER_ID
+            }
           );
+
+          const singleIconSizeExpression = [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "population"], 0],
+            0,
+            12 / POPULATION_HEX_BASE_ICON_SIZE,
+            400,
+            15 / POPULATION_HEX_BASE_ICON_SIZE,
+            1200,
+            18 / POPULATION_HEX_BASE_ICON_SIZE,
+            2200,
+            22 / POPULATION_HEX_BASE_ICON_SIZE,
+            4000,
+            26 / POPULATION_HEX_BASE_ICON_SIZE,
+          ] as unknown as ExpressionSpecification;
 
           map.addLayer({
             id: POPULATION_CLUSTER_UNCLUSTERED_LAYER_ID,
-            type: "circle",
+            type: "symbol",
             source: POPULATION_CLUSTER_SOURCE_ID,
             filter: ["!", ["has", "point_count"]],
             minzoom: 0,
@@ -1648,29 +1725,14 @@ export default function MapView({ selection, cities, stores }: MapViewProps) {
               visibility: populationOverlayEnabledRef.current
                 ? "visible"
                 : "none",
+              "icon-image": clusterIconImageExpression,
+              "icon-size": singleIconSizeExpression,
+              "icon-anchor": "center",
             },
             paint: {
-              "circle-color": clusterColorExpression,
-              "circle-radius": [
-                "interpolate",
-                ["linear"],
-                ["coalesce", ["get", "population"], 0],
-                0,
-                6,
-                400,
-                7.5,
-                1200,
-                9,
-                2200,
-                11,
-                4000,
-                13,
-              ],
-              "circle-opacity": populationOverlayEnabledRef.current
+              "icon-opacity": populationOverlayEnabledRef.current
                 ? Math.min(0.85, populationOverlayOpacityRef.current + 0.15)
                 : 0,
-              "circle-stroke-color": "rgba(15, 23, 42, 0.4)",
-              "circle-stroke-width": 1,
             },
           });
 
